@@ -19,15 +19,12 @@ class TushareClient:
         try:
             ts.set_token(self.token)
             self._api = ts.pro_api()
-            df = self._api.trade_cal(exchange="SSE", start_date="20240101", end_date="20240110")
-            if df is not None and not df.empty:
-                self._initialized = True
-                self.logger.info("Tushare login successful")
-                return True
+            self._initialized = True
+            self.logger.info("Tushare client initialized")
+            return True
         except Exception as e:
-            self.logger.error(f"Tushare login failed: {e}")
-        self.logger.error("Tushare login failed — check your token and network")
-        return False
+            self.logger.error(f"Tushare client init failed: {e}")
+            return False
 
     def _rate_limit(self):
         elapsed = time.time() - self._last_request_time
@@ -59,7 +56,21 @@ class TushareClient:
                 self.logger.warning(f"{api_name} returned empty (attempt {attempt + 1}/{max_retries})")
 
             except Exception as e:
-                self.logger.warning(f"{api_name} error (attempt {attempt + 1}/{max_retries}): {e}")
+                msg = str(e)
+                self.logger.warning(f"{api_name} error (attempt {attempt + 1}/{max_retries}): {msg}")
+                if "次/天" in msg:
+                    self.logger.error(f"{api_name} daily quota exhausted, giving up")
+                    break
+                elif "次/小时" in msg:
+                    wait = 3605
+                elif "次/分钟" in msg:
+                    wait = 65
+                else:
+                    wait = 1
+                if attempt < max_retries - 1:
+                    self.logger.info(f"Retrying in {wait}s")
+                    time.sleep(wait)
+                continue
 
             if attempt < max_retries - 1:
                 time.sleep(1)
