@@ -2,7 +2,9 @@
 # Stock Selection Tool - Configuration
 # ============================================================================
 
-tushare_token: "your_token_here"
+# tushare_token is now read from .env (TUSHARE_TOKEN) for security.
+# Fallback: you can still set it here, but .env takes priority.
+tushare_token: ""
 
 stock_pool:
   markets: ["主板", "创业板", "科创板"]
