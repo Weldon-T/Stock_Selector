@@ -41,6 +41,21 @@ class DataLoader:
             self.cache.put(table, key, df)
         return df
 
+    def load_fina_indicator(self, period: str, force_refresh: bool = False) -> pd.DataFrame:
+        table, key = "fina_indicator", period
+
+        if not force_refresh and self.cache.has(table, key):
+            self.logger.info(f"Loading fina_indicator ({period}) from cache")
+            df = self.cache.get(table, key)
+            if df is not None and not df.empty:
+                return df
+
+        self.logger.info(f"Fetching fina_indicator for period={period}")
+        df = self.client.fina_indicator(period)
+        if not df.empty:
+            self.cache.put(table, key, df)
+        return df
+
     def load_trade_cal(self, start_date: str, end_date: str) -> pd.DataFrame:
         table, key = "trade_cal", f"{start_date}_{end_date}"
 

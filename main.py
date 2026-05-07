@@ -91,7 +91,7 @@ def run_pipeline(config: dict, trade_date: str) -> None:
 
     loader = DataLoader(client, cache)
     stock_filter = StockFilter(config)
-    factor_calc = FactorCalculator(config, client, cache)
+    factor_calc = FactorCalculator(config, loader)
     scorer = StockScorer(config)
 
     # Step 1: Load data
