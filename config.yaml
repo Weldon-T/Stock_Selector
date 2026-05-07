@@ -1,0 +1,69 @@
+# ============================================================================
+# Stock Selection Tool - Configuration
+# ============================================================================
+
+tushare_token: "your_token_here"
+
+stock_pool:
+  markets: ["主板", "创业板", "科创板"]
+  min_listing_days: 60
+  max_suspend_days: 10
+
+select_count: 50
+
+paths:
+  output_dir: ./output
+  cache_dir: ./cache
+  log_dir: ./logs
+
+logging:
+  level: INFO
+  file: run.log
+
+factors:
+  fundamental:
+    pe_ttm:
+      weight: -0.20
+      enabled: true
+      direction: negative
+    pb:
+      weight: -0.10
+      enabled: true
+      direction: negative
+    roe_ttm:
+      weight: 0.20
+      enabled: true
+      direction: positive
+    net_profit_yoy:
+      weight: 0.15
+      enabled: true
+      direction: positive
+    revenue_yoy:
+      weight: 0.10
+      enabled: true
+      direction: positive
+    debt_to_asset:
+      weight: -0.05
+      enabled: true
+      direction: negative
+
+  capital_flow:
+    volume_ratio:
+      weight: 0.10
+      enabled: true
+      direction: positive
+    margin_chg_5d:
+      weight: 0.05
+      enabled: true
+      direction: positive
+    main_inflow_5d:
+      weight: 0.10
+      enabled: false
+      direction: positive
+    north_net_inflow:
+      weight: 0.05
+      enabled: false
+      direction: positive
+
+backtest:
+  hold_period: 20
