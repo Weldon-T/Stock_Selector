@@ -44,12 +44,9 @@ class StockScorer:
         ranked = ranked.fillna(0.5)
         return ranked
 
-    def score(self, df: pd.DataFrame) -> pd.DataFrame:
-        self.logger.info(f"Scoring {len(df)} stocks...")
-
+    def _compute_ranks(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Compute percentile ranks and final_score for all stocks, no truncation."""
         df = df.copy()
-
-        # Compute percentile rank for each factor, then directionalize
         for f in self.factors:
             col = f["name"]
             rank_col = f"{col}_rank"
@@ -60,14 +57,22 @@ class StockScorer:
             else:
                 df[rank_col] = np.nan
 
-        # Weighted sum of rank columns
         df["final_score"] = 0.0
         for f in self.factors:
             rank_col = f"{f['name']}_rank"
             if rank_col in df.columns:
                 df["final_score"] += df[rank_col].fillna(0.5) * f["weight"]
 
-        df = df.sort_values("final_score", ascending=False)
+        return df.sort_values("final_score", ascending=False)
+
+    def score_all(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Compute ranks for all stocks without top-N truncation."""
+        return self._compute_ranks(df).reset_index(drop=True)
+
+    def score(self, df: pd.DataFrame) -> pd.DataFrame:
+        self.logger.info(f"Scoring {len(df)} stocks...")
+
+        df = self._compute_ranks(df)
         df = df.head(self.select_count)
 
         self.logger.info(f"Scoring complete: top {len(df)} stocks selected")
