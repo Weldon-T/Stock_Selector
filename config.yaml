@@ -22,50 +22,57 @@ logging:
   level: INFO
   file: run.log
 
+# ============================================================================
+# Multi-factor scoring model — 9 factors across 5 dimensions
+# All factors derived from bak_basic (single API call) except volume_ratio
+# which uses multi-day daily data.
+# ============================================================================
 factors:
-  fundamental:
-    pe_ttm:
-      weight: -0.20
-      enabled: true
-      direction: negative
-    pb:
-      weight: -0.10
-      enabled: true
-      direction: negative
-    roe_ttm:
-      weight: 0.20
-      enabled: true
-      direction: positive
-    net_profit_yoy:
+  value:
+    ep_ttm:
       weight: 0.15
       enabled: true
-      direction: positive
+      direction: positive      # 1/PE, higher = cheaper
+    bp:
+      weight: 0.10
+      enabled: true
+      direction: positive      # 1/PB, higher = cheaper
+
+  quality:
+    roe_ttm:
+      weight: 0.15
+      enabled: true
+      direction: positive      # EPS/BVPS
+    gross_margin:
+      weight: 0.10
+      enabled: true
+      direction: positive      # 毛利率 = 定价权
+    net_margin:
+      weight: 0.10
+      enabled: true
+      direction: positive      # 净利率 = 盈利质量
+
+  growth:
     revenue_yoy:
       weight: 0.10
       enabled: true
-      direction: positive
-    debt_to_asset:
-      weight: -0.05
+      direction: positive      # 营收增速
+    profit_yoy:
+      weight: 0.10
       enabled: true
-      direction: negative
+      direction: positive      # 利润增速
 
-  capital_flow:
+  size:
+    small_cap:
+      weight: 0.10
+      enabled: true
+      direction: positive      # -ln(total_assets), A股小盘溢价
+
+  technical:
     volume_ratio:
       weight: 0.10
       enabled: true
-      direction: positive
-    margin_chg_5d:
-      weight: 0.05
-      enabled: true
-      direction: positive
-    main_inflow_5d:
-      weight: 0.10
-      enabled: false
-      direction: positive
-    north_net_inflow:
-      weight: 0.05
-      enabled: false
-      direction: positive
+      direction: positive      # 放量=资金关注
 
 backtest:
   hold_period: 20

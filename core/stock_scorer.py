@@ -14,18 +14,21 @@ class StockScorer:
 
     def _build_factor_config(self):
         factors_config = self.config.get("factors", {})
-        for category in ("fundamental", "capital_flow"):
-            cat_cfg = factors_config.get(category, {})
+        for category, cat_cfg in factors_config.items():
+            if not isinstance(cat_cfg, dict):
+                continue
             for name, cfg in cat_cfg.items():
+                if not isinstance(cfg, dict):
+                    continue
                 if cfg.get("enabled", True):
                     self.factors.append({
                         "name": name,
-                        "weight": cfg["weight"],
+                        "weight": abs(cfg["weight"]),
                         "direction": cfg.get("direction", "positive"),
                         "category": category,
                     })
 
-        total_weight = sum(abs(f["weight"]) for f in self.factors)
+        total_weight = sum(f["weight"] for f in self.factors)
         if total_weight > 0:
             for f in self.factors:
                 f["weight"] = f["weight"] / total_weight
@@ -44,11 +47,9 @@ class StockScorer:
     def score(self, df: pd.DataFrame) -> pd.DataFrame:
         self.logger.info(f"Scoring {len(df)} stocks...")
 
-        # M1: Use random scores as placeholder; real percentile ranking in M4
         df = df.copy()
-        df["final_score"] = np.random.rand(len(df))
 
-        # Build rank columns for available factors
+        # Compute percentile rank for each factor, then directionalize
         for f in self.factors:
             col = f["name"]
             rank_col = f"{col}_rank"
@@ -58,6 +59,13 @@ class StockScorer:
                     df[rank_col] = 1.0 - df[rank_col]
             else:
                 df[rank_col] = np.nan
+
+        # Weighted sum of rank columns
+        df["final_score"] = 0.0
+        for f in self.factors:
+            rank_col = f"{f['name']}_rank"
+            if rank_col in df.columns:
+                df["final_score"] += df[rank_col].fillna(0.5) * f["weight"]
 
         df = df.sort_values("final_score", ascending=False)
         df = df.head(self.select_count)

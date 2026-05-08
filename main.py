@@ -108,6 +108,8 @@ def run_pipeline(config: dict, trade_date: str) -> None:
         logger.error(f"No daily data for {trade_date}. Aborting.")
         sys.exit(1)
 
+    df_multi_daily = loader.load_daily_multi(trade_date, lookback=6)
+
     # Step 2: Filter stock pool
     df_filtered = stock_filter.apply(df_basic, df_daily, trade_date)
     if df_filtered.empty:
@@ -115,7 +117,7 @@ def run_pipeline(config: dict, trade_date: str) -> None:
         return
 
     # Step 3: Calculate factors
-    df_factors = factor_calc.calculate(df_filtered, df_daily, trade_date)
+    df_factors = factor_calc.calculate(df_filtered, df_daily, trade_date, df_multi_daily)
 
     # Step 4: Score and rank
     df_result = scorer.score(df_factors)

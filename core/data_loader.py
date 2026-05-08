@@ -57,6 +57,35 @@ class DataLoader:
             self.cache.put(table, key, df)
         return df
 
+    def load_daily_multi(self, end_date: str, lookback: int) -> pd.DataFrame:
+        """Fetch daily data for N days ending at end_date. Returns concatenated DataFrame."""
+        import time
+        frames = []
+        # Generate dates in reverse (newest first), Tushare date format is YYYYMMDD
+        end_dt = pd.to_datetime(end_date, format="%Y%m%d")
+        for i in range(lookback):
+            dt = end_dt - pd.Timedelta(days=i)
+            date_str = dt.strftime("%Y%m%d")
+            table, key = "daily", date_str
+
+            if self.cache.has(table, key):
+                df = self.cache.get(table, key)
+            else:
+                self.logger.info(f"Fetching daily for {date_str}")
+                df = self.client.daily(date_str)
+                if not df.empty:
+                    self.cache.put(table, key, df)
+                time.sleep(0.3)
+
+            if df is not None and not df.empty:
+                frames.append(df)
+
+        if not frames:
+            return pd.DataFrame()
+        result = pd.concat(frames, ignore_index=True)
+        self.logger.info(f"Loaded {len(frames)}/{lookback} days of daily data, {len(result)} total rows")
+        return result
+
     def load_trade_cal(self, start_date: str, end_date: str) -> pd.DataFrame:
         table, key = "trade_cal", f"{start_date}_{end_date}"
 
