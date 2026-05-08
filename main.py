@@ -10,10 +10,12 @@ Usage:
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv
 
 from core.tushare_client import TushareClient
 from core.data_loader import DataLoader
@@ -62,12 +64,13 @@ def load_config(path: str) -> dict:
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
-    token = config.get("tushare_token", "")
-    if token == "your_token_here" or not token:
+    token = os.getenv("TUSHARE_TOKEN") or config.get("tushare_token", "")
+    if not token or token == "your_token_here":
         print("FATAL: Tushare token not configured.")
-        print("Please set your token in config.yaml -> tushare_token")
+        print("Please set TUSHARE_TOKEN in .env file")
         print("Get a free token at: https://tushare.pro")
         sys.exit(1)
+    config["tushare_token"] = token
 
     return config
 
@@ -91,11 +94,11 @@ def run_pipeline(config: dict, trade_date: str) -> None:
 
     loader = DataLoader(client, cache)
     stock_filter = StockFilter(config)
-    factor_calc = FactorCalculator(config, client, cache)
+    factor_calc = FactorCalculator(config)
     scorer = StockScorer(config)
 
     # Step 1: Load data
-    df_basic = loader.load_stock_basic()
+    df_basic = loader.load_stock_basic(trade_date)
     if df_basic.empty:
         logger.error("Failed to load stock_basic. Aborting.")
         sys.exit(1)
@@ -135,6 +138,8 @@ def run_pipeline(config: dict, trade_date: str) -> None:
 
 
 def main():
+    load_dotenv()
+
     args = parse_args()
     config = load_config(args.config)
 

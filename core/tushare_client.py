@@ -19,15 +19,12 @@ class TushareClient:
         try:
             ts.set_token(self.token)
             self._api = ts.pro_api()
-            df = self._api.trade_cal(exchange="SSE", start_date="20240101", end_date="20240110")
-            if df is not None and not df.empty:
-                self._initialized = True
-                self.logger.info("Tushare login successful")
-                return True
+            self._initialized = True
+            self.logger.info("Tushare client initialized")
+            return True
         except Exception as e:
-            self.logger.error(f"Tushare login failed: {e}")
-        self.logger.error("Tushare login failed — check your token and network")
-        return False
+            self.logger.error(f"Tushare client init failed: {e}")
+            return False
 
     def _rate_limit(self):
         elapsed = time.time() - self._last_request_time
@@ -59,16 +56,51 @@ class TushareClient:
                 self.logger.warning(f"{api_name} returned empty (attempt {attempt + 1}/{max_retries})")
 
             except Exception as e:
-                self.logger.warning(f"{api_name} error (attempt {attempt + 1}/{max_retries}): {e}")
+                msg = str(e)
+                self.logger.warning(f"{api_name} error (attempt {attempt + 1}/{max_retries}): {msg}")
+                if "次/天" in msg:
+                    self.logger.error(f"{api_name} daily quota exhausted, giving up")
+                    break
+                elif "次/小时" in msg:
+                    wait = 3605
+                elif "次/分钟" in msg:
+                    wait = 65
+                else:
+                    wait = 1
+                if attempt < max_retries - 1:
+                    self.logger.info(f"Retrying in {wait}s")
+                    time.sleep(wait)
+                continue
 
             if attempt < max_retries - 1:
                 time.sleep(1)
 
         return pd.DataFrame()
 
-    def stock_basic(self) -> pd.DataFrame:
-        fields = "ts_code,symbol,name,area,industry,list_date,market,exchange,is_st"
-        return self.request("stock_basic", fields=fields)
+    def stock_basic(self, trade_date: str = "") -> pd.DataFrame:
+        fields = "trade_date,ts_code,name,industry,area,list_date,rev_yoy,profit_yoy,eps,bvps,total_assets"
+        params = {"fields": fields}
+        if trade_date:
+            params["trade_date"] = trade_date
+        df = self.request("bak_basic", **params)
+        if not df.empty:
+            df["is_st"] = df["name"].str.match(r"^\*?ST", na=False).astype(int)
+            df["symbol"] = df["ts_code"].str.replace(r"\.(SZ|SH|BJ)$", "", regex=True)
+            # Derive exchange and market from ts_code suffix
+            suffix = df["ts_code"].str.extract(r"\.(SZ|SH|BJ)$", expand=False)
+            df["exchange"] = suffix.map({"SH": "SSE", "SZ": "SZSE", "BJ": "BSE"})
+            # Market: 688->科创板, 300/301->创业板, BJ->北交所, rest->主板
+            code_prefix = df["symbol"].str[:3]
+            conditions = [
+                suffix.eq("BJ"),
+                suffix.eq("SH") & code_prefix.str.match(r"^688"),
+                suffix.eq("SZ") & code_prefix.str.match(r"^30[0-9]"),
+            ]
+            choices = ["北交所", "科创板", "创业板"]
+            df["market"] = pd.Series("主板", index=df.index)
+            for cond, choice in zip(conditions, choices):
+                df.loc[cond, "market"] = choice
+        return df
 
     def daily(self, trade_date: str) -> pd.DataFrame:
         return self.request("daily", trade_date=trade_date)
