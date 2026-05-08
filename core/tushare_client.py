@@ -77,9 +77,30 @@ class TushareClient:
 
         return pd.DataFrame()
 
-    def stock_basic(self) -> pd.DataFrame:
-        fields = "ts_code,symbol,name,area,industry,list_date,market,exchange,is_st"
-        return self.request("stock_basic", fields=fields)
+    def stock_basic(self, trade_date: str = "") -> pd.DataFrame:
+        fields = "trade_date,ts_code,name,industry,area,list_date,rev_yoy,profit_yoy,eps,bvps,total_assets"
+        params = {"fields": fields}
+        if trade_date:
+            params["trade_date"] = trade_date
+        df = self.request("bak_basic", **params)
+        if not df.empty:
+            df["is_st"] = df["name"].str.match(r"^\*?ST", na=False).astype(int)
+            df["symbol"] = df["ts_code"].str.replace(r"\.(SZ|SH|BJ)$", "", regex=True)
+            # Derive exchange and market from ts_code suffix
+            suffix = df["ts_code"].str.extract(r"\.(SZ|SH|BJ)$", expand=False)
+            df["exchange"] = suffix.map({"SH": "SSE", "SZ": "SZSE", "BJ": "BSE"})
+            # Market: 688->科创板, 300/301->创业板, BJ->北交所, rest->主板
+            code_prefix = df["symbol"].str[:3]
+            conditions = [
+                suffix.eq("BJ"),
+                suffix.eq("SH") & code_prefix.str.match(r"^688"),
+                suffix.eq("SZ") & code_prefix.str.match(r"^30[0-9]"),
+            ]
+            choices = ["北交所", "科创板", "创业板"]
+            df["market"] = pd.Series("主板", index=df.index)
+            for cond, choice in zip(conditions, choices):
+                df.loc[cond, "market"] = choice
+        return df
 
     def daily(self, trade_date: str) -> pd.DataFrame:
         return self.request("daily", trade_date=trade_date)

@@ -94,11 +94,11 @@ def run_pipeline(config: dict, trade_date: str) -> None:
 
     loader = DataLoader(client, cache)
     stock_filter = StockFilter(config)
-    factor_calc = FactorCalculator(config, loader)
+    factor_calc = FactorCalculator(config)
     scorer = StockScorer(config)
 
     # Step 1: Load data
-    df_basic = loader.load_stock_basic()
+    df_basic = loader.load_stock_basic(trade_date)
     if df_basic.empty:
         logger.error("Failed to load stock_basic. Aborting.")
         sys.exit(1)

@@ -11,8 +11,9 @@ class DataLoader:
         self.cache = cache
         self.logger = get_logger()
 
-    def load_stock_basic(self, force_refresh: bool = False) -> pd.DataFrame:
-        table, key = "stock_basic", "latest"
+    def load_stock_basic(self, trade_date: str = "", force_refresh: bool = False) -> pd.DataFrame:
+        key = trade_date if trade_date else "latest"
+        table = "stock_basic"
 
         if not force_refresh and self.cache.has(table, key):
             self.logger.info("Loading stock_basic from cache")
@@ -21,7 +22,7 @@ class DataLoader:
                 return df
 
         self.logger.info("Fetching stock_basic from Tushare")
-        df = self.client.stock_basic()
+        df = self.client.stock_basic(trade_date)
         if not df.empty:
             self.cache.put(table, key, df)
         return df
