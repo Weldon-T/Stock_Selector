@@ -23,6 +23,17 @@ class FactorCalculator:
         else:
             return f"{year - 1}1231"
 
+    def _compute_volatility(self, df: pd.DataFrame, multi_daily: pd.DataFrame) -> pd.Series:
+        """Compute daily return std (annualized) from multi-day daily data."""
+        if multi_daily is None or multi_daily.empty or "close" not in multi_daily.columns:
+            return pd.Series(np.nan, index=df.index)
+
+        returns = multi_daily.sort_values(["ts_code", "trade_date"]).groupby("ts_code")["close"].pct_change()
+        # pct_change() gives NaN for the first row of each group — that's correct
+        vol = returns.groupby(multi_daily["ts_code"]).std() * np.sqrt(250)  # annualize
+        vol.name = "volatility"
+        return df[["ts_code"]].merge(vol, on="ts_code", how="left")["volatility"]
+
     def _compute_volume_ratio(self, df: pd.DataFrame, multi_daily: pd.DataFrame) -> pd.Series:
         """Compute vol / avg_vol_5d from multi-day daily data."""
         if multi_daily is None or multi_daily.empty:
@@ -52,7 +63,7 @@ class FactorCalculator:
     ) -> pd.DataFrame:
         self.logger.info(f"Calculating factors for trade_date={trade_date}")
 
-        base_cols = ["ts_code", "name", "industry"]
+        base_cols = ["ts_code", "name", "industry", "market"]
         bak_cols = ["pe", "pb", "eps", "bvps", "gpr", "npr", "rev_yoy", "profit_yoy", "total_assets"]
         available_bak = [c for c in bak_cols if c in stock_list.columns]
         df = stock_list[base_cols + available_bak].copy()
@@ -101,6 +112,7 @@ class FactorCalculator:
         available_daily = [c for c in daily_cols if c in daily_data.columns]
         df = df.merge(daily_data[available_daily], on="ts_code", how="left")
         df["volume_ratio"] = self._compute_volume_ratio(df, multi_daily)
+        df["volatility"] = self._compute_volatility(df, multi_daily)
 
         # --- Metadata ---
         df["financial_period"] = self._get_financial_period(trade_date)
@@ -112,7 +124,8 @@ class FactorCalculator:
         df.drop(columns=drop_raw, inplace=True, errors="ignore")
 
         factor_names = ["ep_ttm", "bp", "roe_ttm", "gross_margin", "net_margin",
-                        "revenue_yoy", "profit_yoy", "small_cap", "volume_ratio"]
+                        "revenue_yoy", "profit_yoy", "small_cap", "volume_ratio",
+                        "volatility"]
         available = [f for f in factor_names if f in df.columns and df[f].notna().any()]
         self.logger.info(f"Factor calculation complete: {len(df)} stocks, "
                          f"factors with data: {available}")

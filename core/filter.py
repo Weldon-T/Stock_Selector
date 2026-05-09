@@ -10,11 +10,12 @@ class StockFilter:
         self.markets = pool.get("markets", ["主板", "创业板", "科创板"])
         self.min_listing_days = pool.get("min_listing_days", 60)
         self.max_suspend_days = pool.get("max_suspend_days", 10)
+        self.min_daily_amount = pool.get("min_daily_amount", 50_000_000)
         self.logger = get_logger()
 
     def filter_market(self, df: pd.DataFrame) -> pd.DataFrame:
         if "market" not in df.columns:
-            self.logger.warning("No 'market' column in stock_basic; skipping market filter")
+            self.logger.warning("No 'market' column; skipping market filter")
             return df
         before = len(df)
         result = df[df["market"].isin(self.markets)].copy()
@@ -52,6 +53,19 @@ class StockFilter:
         self.logger.info(f"Suspension filter: {before} -> {len(result)} stocks")
         return result
 
+    def filter_liquidity(self, df: pd.DataFrame, daily_data: pd.DataFrame) -> pd.DataFrame:
+        """Remove stocks with average daily turnover below threshold."""
+        if "amount" not in daily_data.columns:
+            self.logger.warning("No 'amount' in daily data; skipping liquidity filter")
+            return df
+        before = len(df)
+        avg_amount = daily_data.groupby("ts_code")["amount"].mean()
+        liquid_codes = set(avg_amount[avg_amount >= self.min_daily_amount].index)
+        result = df[df["ts_code"].isin(liquid_codes)].copy()
+        self.logger.info(f"Liquidity filter (amount>={self.min_daily_amount/1000:.0f}M yuan): "
+                         f"{before} -> {len(result)} stocks")
+        return result
+
     def apply(self, df_basic: pd.DataFrame, df_daily: pd.DataFrame, trade_date: str) -> pd.DataFrame:
         self.logger.info(f"Applying filters for trade_date={trade_date}")
 
@@ -59,6 +73,7 @@ class StockFilter:
         df = self.filter_st(df)
         df = self.filter_new_stocks(df, trade_date)
         df = self.filter_suspended(df, df_daily)
+        df = self.filter_liquidity(df, df_daily)
 
         if df.empty:
             self.logger.warning("All stocks filtered out — pipeline will abort")

@@ -127,7 +127,7 @@ def run_pipeline(config: dict, trade_date: str) -> None:
         logger.error(f"No daily data for {trade_date}. Aborting.")
         sys.exit(1)
 
-    df_multi_daily = loader.load_daily_multi(trade_date, lookback=6)
+    df_multi_daily = loader.load_daily_multi(trade_date, lookback=10)
     df_filtered = stock_filter.apply(df_basic, df_daily, trade_date)
     if df_filtered.empty:
         logger.warning("No stocks passed the filter. Exiting.")
@@ -196,7 +196,7 @@ def _run_quarter_date(loader, stock_filter, factor_calc, d: str) -> pd.DataFrame
     if df_daily.empty:
         return None
 
-    df_multi_daily = loader.load_daily_multi(d, lookback=6)
+    df_multi_daily = loader.load_daily_multi(d, lookback=10)
     df_filtered = stock_filter.apply(df_basic, df_daily, d)
     if df_filtered.empty:
         return None

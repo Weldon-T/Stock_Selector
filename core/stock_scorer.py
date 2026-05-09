@@ -38,20 +38,34 @@ class StockScorer:
         weight_info = [f"{f['name']}={f['weight']:.3f}" for f in self.factors]
         self.logger.info(f"Normalized weights: {weight_info}")
 
-    def compute_rank(self, series: pd.Series) -> pd.Series:
-        """Percentile rank (0~1), higher is better raw value."""
-        ranked = series.rank(pct=True, na_option="bottom")
-        ranked = ranked.fillna(0.5)
-        return ranked
+    def _grouped_rank(self, df: pd.DataFrame, col: str, group_col: str) -> pd.Series:
+        """Percentile rank within each group. Returns Series aligned to df index."""
+        result = pd.Series(np.nan, index=df.index)
+        if group_col not in df.columns:
+            # Fall back to cross-market ranking
+            ranked = df[col].rank(pct=True, na_option="bottom")
+            return ranked.fillna(0.5)
+        for g, idx in df.groupby(group_col).groups.items():
+            subset = df.loc[idx, col]
+            ranked = subset.rank(pct=True, na_option="bottom")
+            result.loc[idx] = ranked
+        return result.fillna(0.5)
 
-    def _compute_ranks(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Compute percentile ranks and final_score for all stocks, no truncation."""
+    def _compute_ranks(self, df: pd.DataFrame, sector_neutral: bool = False) -> pd.DataFrame:
+        """Compute percentile ranks and final_score for all stocks."""
         df = df.copy()
+
+        group_col = "market" if sector_neutral else None
+
         for f in self.factors:
             col = f["name"]
             rank_col = f"{col}_rank"
             if col in df.columns:
-                df[rank_col] = self.compute_rank(df[col])
+                if sector_neutral and group_col and group_col in df.columns:
+                    df[rank_col] = self._grouped_rank(df, col, group_col)
+                else:
+                    df[rank_col] = df[col].rank(pct=True, na_option="bottom").fillna(0.5)
+
                 if f["direction"] == "negative":
                     df[rank_col] = 1.0 - df[rank_col]
             else:
@@ -65,14 +79,15 @@ class StockScorer:
 
         return df.sort_values("final_score", ascending=False)
 
-    def score_all(self, df: pd.DataFrame) -> pd.DataFrame:
+    def score_all(self, df: pd.DataFrame, sector_neutral: bool = False) -> pd.DataFrame:
         """Compute ranks for all stocks without top-N truncation."""
-        return self._compute_ranks(df).reset_index(drop=True)
+        return self._compute_ranks(df, sector_neutral).reset_index(drop=True)
 
-    def score(self, df: pd.DataFrame) -> pd.DataFrame:
-        self.logger.info(f"Scoring {len(df)} stocks...")
+    def score(self, df: pd.DataFrame, sector_neutral: bool = False) -> pd.DataFrame:
+        mode = "sector-neutral" if sector_neutral else "cross-market"
+        self.logger.info(f"Scoring {len(df)} stocks ({mode})...")
 
-        df = self._compute_ranks(df)
+        df = self._compute_ranks(df, sector_neutral)
         df = df.head(self.select_count)
 
         self.logger.info(f"Scoring complete: top {len(df)} stocks selected")

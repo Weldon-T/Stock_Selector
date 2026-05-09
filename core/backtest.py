@@ -80,7 +80,7 @@ class Backtest:
             if df_daily.empty:
                 continue
 
-            df_multi_daily = loader.load_daily_multi(resolved, lookback=6)
+            df_multi_daily = loader.load_daily_multi(resolved, lookback=10)
             df_filtered = stock_filter.apply(df_basic, df_daily, resolved)
             if df_filtered.empty:
                 continue
@@ -243,11 +243,16 @@ class Backtest:
                 continue
             port_ret = np.mean(list(port_rets.values()))
 
-            # Benchmark: all stocks on rebalance date
-            df_all = loader.load_daily_all(rb_date)
-            all_codes = df_all["ts_code"].unique().tolist()
-            bench_rets = self._compute_returns(loader, all_codes, rb_date, fwd_date)
-            bench_ret = np.mean(list(bench_rets.values())) if bench_rets else 0.0
+            # Benchmark: all FILTERED stocks (same universe we select from)
+            df_basic = loader.load_stock_basic(rb_date)
+            df_daily = loader.load_daily_all(rb_date)
+            df_filtered_all = stock_filter.apply(df_basic, df_daily, rb_date)
+            if df_filtered_all.empty:
+                bench_ret = 0.0
+            else:
+                bench_codes = df_filtered_all["ts_code"].unique().tolist()
+                bench_rets = self._compute_returns(loader, bench_codes, rb_date, fwd_date)
+                bench_ret = np.mean(list(bench_rets.values())) if bench_rets else 0.0
 
             periods.append({
                 "rebalance_date": rb_date,

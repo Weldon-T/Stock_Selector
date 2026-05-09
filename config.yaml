@@ -2,14 +2,13 @@
 # Stock Selection Tool - Configuration
 # ============================================================================
 
-# tushare_token is now read from .env (TUSHARE_TOKEN) for security.
-# Fallback: you can still set it here, but .env takes priority.
 tushare_token: ""
 
 stock_pool:
   markets: ["主板", "创业板", "科创板"]
   min_listing_days: 60
   max_suspend_days: 10
+  min_daily_amount: 50000      # 50M yuan (amount in thousands)
 
 select_count: 50
 
@@ -23,20 +22,19 @@ logging:
   file: run.log
 
 # ============================================================================
-# Multi-factor scoring model — 9 factors across 5 dimensions
-# All factors derived from bak_basic (single API call) except volume_ratio
-# which uses multi-day daily data.
+# Multi-factor scoring model — 10 factors across 5 dimensions
+# Focus: investable quality, risk control, reasonable valuation
 # ============================================================================
 factors:
   value:
     ep_ttm:
-      weight: 0.15
+      weight: 0.12
       enabled: true
-      direction: positive      # 1/PE, higher = cheaper
+      direction: positive      # 1/PE
     bp:
-      weight: 0.10
+      weight: 0.08
       enabled: true
-      direction: positive      # 1/PB, higher = cheaper
+      direction: positive      # 1/PB
 
   quality:
     roe_ttm:
@@ -54,25 +52,32 @@ factors:
 
   growth:
     revenue_yoy:
-      weight: 0.10
+      weight: 0.08
       enabled: true
       direction: positive      # 营收增速
     profit_yoy:
-      weight: 0.10
+      weight: 0.08
       enabled: true
       direction: positive      # 利润增速
 
   size:
     small_cap:
-      weight: 0.10
+      weight: 0.08
       enabled: true
-      direction: positive      # -ln(total_assets), A股小盘溢价
+      direction: positive      # -ln(total_assets)
 
-  technical:
-    volume_ratio:
+  risk:
+    volatility:
       weight: 0.10
       enabled: true
-      direction: positive      # 放量=资金关注
+      direction: negative      # 低波动 = 风险可控
+
+    volume_ratio:
+      weight: 0.05
+      enabled: true
+      direction: positive      # 适度放量
+
+  # Total: 1.00 → normalized automatically
 
 backtest:
   hold_months: 3
