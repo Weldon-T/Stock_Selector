@@ -75,4 +75,4 @@ factors:
       direction: positive      # 放量=资金关注
 
 backtest:
-  hold_period: 20
+  hold_months: 3
