@@ -4,14 +4,6 @@
 
 tushare_token: ""
 
-stock_pool:
-  markets: ["主板", "创业板", "科创板"]
-  min_listing_days: 60
-  max_suspend_days: 10
-  min_daily_amount: 50000      # 50M yuan (amount in thousands)
-
-select_count: 50
-
 paths:
   output_dir: ./output
   cache_dir: ./cache
@@ -21,63 +13,177 @@ logging:
   level: INFO
   file: run.log
 
+# Days of daily data to load for technical factors (robust to holidays)
+multi_daily_lookback: 15
+
+# Default strategy
+strategy: value
+
 # ============================================================================
-# Multi-factor scoring model — 10 factors across 5 dimensions
-# Focus: investable quality, risk control, reasonable valuation
+# Strategy Profiles
 # ============================================================================
-factors:
+strategies:
+
+  # --------------------------------------------------------------------------
+  # Value Investing — quality & valuation focus, quarterly rebalance
+  # --------------------------------------------------------------------------
   value:
-    ep_ttm:
-      weight: 0.12
-      enabled: true
-      direction: positive      # 1/PE
-    bp:
-      weight: 0.08
-      enabled: true
-      direction: positive      # 1/PB
+    hold_months: 3
 
-  quality:
-    roe_ttm:
-      weight: 0.15
-      enabled: true
-      direction: positive      # EPS/BVPS
-    gross_margin:
-      weight: 0.10
-      enabled: true
-      direction: positive      # 毛利率 = 定价权
-    net_margin:
-      weight: 0.10
-      enabled: true
-      direction: positive      # 净利率 = 盈利质量
+    select_count:
+      主板: 50
+      创业板: 20
+      科创板: 20
 
-  growth:
-    revenue_yoy:
-      weight: 0.08
-      enabled: true
-      direction: positive      # 营收增速
-    profit_yoy:
-      weight: 0.08
-      enabled: true
-      direction: positive      # 利润增速
+    stock_pool:
+      markets: ["主板", "创业板", "科创板"]
+      min_listing_days: 60
+      max_suspend_days: 10
+      min_daily_amount: 50000      # 50M yuan (amount in thousands)
 
-  size:
-    small_cap:
-      weight: 0.08
-      enabled: true
-      direction: positive      # -ln(total_assets)
+    factors:
+      value:
+        ep_ttm:
+          weight: 0.15
+          enabled: true
+          direction: positive      # 1/PE
+        bp:
+          weight: 0.10
+          enabled: true
+          direction: positive      # 1/PB
 
-  risk:
-    volatility:
-      weight: 0.10
-      enabled: true
-      direction: negative      # 低波动 = 风险可控
+      quality:
+        roe_ttm:
+          weight: 0.18
+          enabled: true
+          direction: positive      # EPS/BVPS
+        gross_margin:
+          weight: 0.12
+          enabled: true
+          direction: positive      # 毛利率
+        net_margin:
+          weight: 0.10
+          enabled: true
+          direction: positive      # 净利率
 
-    volume_ratio:
-      weight: 0.05
-      enabled: true
-      direction: positive      # 适度放量
+      growth:
+        revenue_yoy:
+          weight: 0.05
+          enabled: true
+          direction: positive      # 营收增速
+        profit_yoy:
+          weight: 0.05
+          enabled: true
+          direction: positive      # 利润增速
 
-  # Total: 1.00 → normalized automatically
+      size:
+        small_cap:
+          weight: 0.06
+          enabled: true
+          direction: positive      # -ln(total_assets)
 
-backtest:
-  hold_months: 3
+      risk:
+        volatility:
+          weight: 0.10
+          enabled: true
+          direction: negative      # 低波动
+        amplitude:
+          weight: 0.03
+          enabled: true
+          direction: negative      # 低日内振幅
+        amount_stability:
+          weight: 0.02
+          enabled: true
+          direction: negative      # 成交额稳定
+        volume_ratio:
+          weight: 0.03
+          enabled: true
+          direction: positive      # 适度放量
+
+      # Total: 1.00; no short_reversal — value doesn't chase bounces
+
+  # --------------------------------------------------------------------------
+  # Small-Cap Speculation — size + reversal + low-vol, monthly rebalance
+  # --------------------------------------------------------------------------
+  smallcap:
+    hold_months: 1
+
+    select_count:
+      主板: 30
+      创业板: 30
+      科创板: 30
+
+    stock_pool:
+      markets: ["主板", "创业板", "科创板"]
+      min_listing_days: 60
+      max_suspend_days: 10
+      min_daily_amount: 30000      # 30M yuan — lower bar for small-caps
+
+    factors:
+      value:
+        ep_ttm:
+          weight: 0.05
+          enabled: true
+          direction: positive
+        bp:
+          weight: 0.03
+          enabled: true
+          direction: positive
+
+      quality:
+        roe_ttm:
+          weight: 0.03
+          enabled: true
+          direction: positive
+        gross_margin:
+          weight: 0.03
+          enabled: true
+          direction: positive
+        net_margin:
+          weight: 0.03
+          enabled: true
+          direction: positive
+
+      growth:
+        revenue_yoy:
+          weight: 0.03
+          enabled: true
+          direction: positive
+        profit_yoy:
+          weight: 0.03
+          enabled: true
+          direction: positive
+
+      size:
+        small_cap:
+          weight: 0.18
+          enabled: true
+          direction: positive      # heavy tilt toward small
+
+      risk:
+        volatility:
+          weight: 0.15
+          enabled: true
+          direction: negative
+        amplitude:
+          weight: 0.10
+          enabled: true
+          direction: negative
+        amount_stability:
+          weight: 0.07
+          enabled: true
+          direction: negative
+        volume_ratio:
+          weight: 0.05
+          enabled: true
+          direction: positive
+
+      momentum:
+        short_reversal:
+          weight: 0.17
+          enabled: true
+          direction: positive      # 5-day reversal: buy recent losers
+        short_momentum:
+          weight: 0.05
+          enabled: true
+          direction: positive      # 3-day momentum: ride winners

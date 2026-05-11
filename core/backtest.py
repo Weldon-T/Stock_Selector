@@ -14,8 +14,6 @@ from utils.cache import SQLiteCache
 from utils.date_utils import format_date
 from utils.logger import get_logger
 
-PER_MARKET_COUNTS = {"主板": 50, "创业板": 20, "科创板": 20}
-
 
 def _quarter_end_dates(end_date: str):
     """Generate the 4 most recent quarter-end dates (YYYYMMDD)."""
@@ -80,7 +78,7 @@ class Backtest:
             if df_daily.empty:
                 continue
 
-            df_multi_daily = loader.load_daily_multi(resolved, lookback=10)
+            df_multi_daily = loader.load_daily_multi(resolved, lookback=self.config.get("multi_daily_lookback", 10))
             df_filtered = stock_filter.apply(df_basic, df_daily, resolved)
             if df_filtered.empty:
                 continue
@@ -124,6 +122,26 @@ class Backtest:
                         value_sums[code][fn] += val * w
                 weight_sums[code] += w
 
+        # Overwrite technical factors with latest quarter only
+        TECH_FACTORS = {"short_reversal", "short_momentum", "volatility", "amplitude", "amount_stability", "volume_ratio"}
+        latest_qr = quarter_results[-1]
+        latest_scored = scorer.score_all(latest_qr["df"], sector_neutral=True)
+        latest_lookup = latest_scored.set_index("ts_code")
+        for code in valid_codes:
+            if code not in latest_lookup.index:
+                continue
+            row = latest_lookup.loc[code]
+            for fn in TECH_FACTORS:
+                if fn in latest_lookup.columns:
+                    val = row[fn]
+                    if not np.isnan(val):
+                        value_sums[code][fn] = val
+                rc = f"{fn}_rank"
+                if rc in latest_lookup.columns:
+                    val = row[rc]
+                    if not np.isnan(val):
+                        rank_sums[code][rc] = val
+
         # Step 3: Build scored DataFrame
         records = []
         for code in valid_codes:
@@ -151,8 +169,9 @@ class Backtest:
         df_all = pd.DataFrame(records).sort_values("final_score", ascending=False)
 
         # Per-market selection
+        select_count = self.config.get("select_count", {"主板": 50, "创业板": 20, "科创板": 20})
         parts = []
-        for mkt, count in PER_MARKET_COUNTS.items():
+        for mkt, count in select_count.items():
             subset = df_all[df_all["market"] == mkt].head(count)
             parts.append(subset)
 
@@ -196,22 +215,20 @@ class Backtest:
         factor_calc = FactorCalculator(self.config)
         scorer = StockScorer(self.config)
 
-        # Generate quarterly rebalancing dates
+        # Generate rebalancing dates at hold_months intervals
         rebalance_dates = []
         dt = pd.to_datetime(start_date, format="%Y%m%d")
         end_dt = pd.to_datetime(end_date, format="%Y%m%d")
         while dt <= end_dt:
-            # Quarter-end months
-            if dt.month in (3, 6, 9, 12):
-                d_str = dt.strftime("%Y%m%d")
+            # End of current month as target; resolve to nearest trade date
+            month_end = dt + pd.offsets.MonthEnd(0)
+            d_str = month_end.strftime("%Y%m%d")
+            if d_str >= start_date:
                 resolved = _resolve_date(loader, d_str)
                 if resolved and resolved not in rebalance_dates:
                     rebalance_dates.append(resolved)
-            # Advance to next month
-            if dt.month == 12:
-                dt = pd.Timestamp(year=dt.year + 1, month=1, day=1)
-            else:
-                dt = pd.Timestamp(year=dt.year, month=dt.month + 1, day=1)
+            # Advance to first day of next interval
+            dt = month_end + pd.DateOffset(months=self.hold_months - 1, days=1)
 
         logger.info(f"Rebalance dates: {[format_date(d) for d in rebalance_dates]}")
 
@@ -281,16 +298,17 @@ class Backtest:
         port_cum = np.prod(1 + port_returns) - 1
         bench_cum = np.prod(1 + bench_returns) - 1
 
-        # Annualized (quarterly → annual)
+        # Annualized
         n_periods = len(port_returns)
         years = n_periods * self.hold_months / 12
         port_ann = (1 + port_cum) ** (1 / years) - 1 if years > 0 else 0
         bench_ann = (1 + bench_cum) ** (1 / years) - 1 if years > 0 else 0
 
-        # Sharpe ratio (quarterly, annualized)
-        rf_quarterly = 0.02 / 4  # 2% annual risk-free
-        excess = port_returns - rf_quarterly
-        sharpe = np.mean(excess) / np.std(excess) * np.sqrt(4) if np.std(excess) > 0 else 0
+        # Sharpe ratio (annualized from per-period returns)
+        rf_per_period = 0.02 * self.hold_months / 12  # 2% annual risk-free
+        excess = port_returns - rf_per_period
+        periods_per_year = 12 / self.hold_months
+        sharpe = np.mean(excess) / np.std(excess) * np.sqrt(periods_per_year) if np.std(excess) > 0 else 0
 
         # Max drawdown
         cum_series = np.cumprod(1 + port_returns)
