@@ -60,10 +60,14 @@ def parse_args() -> argparse.Namespace:
         "--config", type=str, default="config.yaml",
         help="Path to config file (default: config.yaml)",
     )
+    parser.add_argument(
+        "--strategy", type=str, default=None,
+        help="Strategy profile: value or smallcap (default: from config.yaml)",
+    )
     return parser.parse_args()
 
 
-def load_config(path: str) -> dict:
+def load_config(path: str, strategy: str | None = None) -> dict:
     config_path = Path(path)
     if not config_path.exists():
         print(f"FATAL: Config file not found: {config_path}")
@@ -80,7 +84,32 @@ def load_config(path: str) -> dict:
         sys.exit(1)
     config["tushare_token"] = token
 
+    _resolve_strategy(config, strategy)
     return config
+
+
+def _resolve_strategy(config: dict, strategy: str | None) -> None:
+    """Lift a strategy profile's keys to config top-level.
+
+    Strategy-specific keys (factors, stock_pool, select_count, hold_months)
+    are promoted so downstream code reads them from their usual paths.
+    """
+    strategies = config.get("strategies", {})
+    if not strategies:
+        return
+
+    name = strategy or config.get("strategy", "value")
+    if name not in strategies:
+        print(f"FATAL: Unknown strategy '{name}'. Available: {list(strategies)}")
+        sys.exit(1)
+
+    profile = strategies[name]
+    for key in ("factors", "stock_pool", "select_count"):
+        if key in profile:
+            config[key] = profile[key]
+    if "hold_months" in profile:
+        config.setdefault("backtest", {})
+        config["backtest"]["hold_months"] = profile["hold_months"]
 
 
 # ============================================================================
@@ -127,26 +156,34 @@ def run_pipeline(config: dict, trade_date: str) -> None:
         logger.error(f"No daily data for {trade_date}. Aborting.")
         sys.exit(1)
 
-    df_multi_daily = loader.load_daily_multi(trade_date, lookback=10)
+    df_multi_daily = loader.load_daily_multi(trade_date, lookback=config.get("multi_daily_lookback", 10))
     df_filtered = stock_filter.apply(df_basic, df_daily, trade_date)
     if df_filtered.empty:
         logger.warning("No stocks passed the filter. Exiting.")
         return
 
     df_factors = factor_calc.calculate(df_filtered, df_daily, trade_date, df_multi_daily)
-    df_result = scorer.score(df_factors)
+    df_scored = scorer.score_all(df_factors, sector_neutral=True)
+
+    # Per-market selection
+    select_count = config.get("select_count", {"主板": 50, "创业板": 20, "科创板": 20})
+    parts = []
+    for market, count in select_count.items():
+        subset = df_scored[df_scored["market"] == market].head(count)
+        parts.append(subset)
+        logger.info(f"  {market}: selected {len(subset)}/{count}")
+    df_result = pd.concat(parts, ignore_index=True)
+    df_result = df_result.sort_values("final_score", ascending=False).reset_index(drop=True)
 
     output_path = output_dir / f"选股结果_{trade_date}.csv"
     df_result.to_csv(output_path, index=False, encoding="utf-8-sig")
-    logger.info(f"Results saved to: {output_path}")
+    logger.info(f"Results saved to: {output_path} ({len(df_result)} stocks)")
     _print_top10(df_result, format_date(trade_date))
 
 
 # ============================================================================
 # Multi-quarter pipeline
 # ============================================================================
-
-PER_MARKET_COUNTS = {"主板": 50, "创业板": 20, "科创板": 20}
 
 
 def _quarter_end_dates(end_date: str):
@@ -186,7 +223,8 @@ def _resolve_date(loader, date_str: str) -> str | None:
     return None
 
 
-def _run_quarter_date(loader, stock_filter, factor_calc, d: str) -> pd.DataFrame | None:
+def _run_quarter_date(loader, stock_filter, factor_calc, d: str,
+                     lookback: int = 10) -> pd.DataFrame | None:
     """Run single-date pipeline for one quarter and return factor DataFrame."""
     df_basic = loader.load_stock_basic(d)
     if df_basic.empty:
@@ -196,7 +234,7 @@ def _run_quarter_date(loader, stock_filter, factor_calc, d: str) -> pd.DataFrame
     if df_daily.empty:
         return None
 
-    df_multi_daily = loader.load_daily_multi(d, lookback=10)
+    df_multi_daily = loader.load_daily_multi(d, lookback=lookback)
     df_filtered = stock_filter.apply(df_basic, df_daily, d)
     if df_filtered.empty:
         return None
@@ -237,7 +275,8 @@ def run_multi_quarter(config: dict, end_date: str) -> None:
             continue
 
         logger.info(f"  {format_date(qd)} -> {format_date(resolved)} (weight={w})")
-        df = _run_quarter_date(loader, stock_filter, factor_calc, resolved)
+        df = _run_quarter_date(loader, stock_filter, factor_calc, resolved,
+                              lookback=config.get("multi_daily_lookback", 10))
         if df is not None and len(df) > 100:
             quarter_results.append({"quarter": resolved, "weight": w, "df": df})
             logger.info(f"    {len(df)} stocks")
@@ -282,6 +321,26 @@ def run_multi_quarter(config: dict, end_date: str) -> None:
                     value_sums[code][fn] += val * w
             weight_sums[code] += w
 
+    # Overwrite technical factors with latest quarter only
+    TECH_FACTORS = {"short_reversal", "short_momentum", "volatility", "amplitude", "amount_stability", "volume_ratio"}
+    latest_qr = quarter_results[-1]
+    latest_scored = scorer.score_all(latest_qr["df"], sector_neutral=True)
+    latest_lookup = latest_scored.set_index("ts_code")
+    for code in valid_codes:
+        if code not in latest_lookup.index:
+            continue
+        row = latest_lookup.loc[code]
+        for fn in TECH_FACTORS:
+            if fn in latest_lookup.columns:
+                val = row[fn]
+                if not np.isnan(val):
+                    value_sums[code][fn] = val
+            rc = f"{fn}_rank"
+            if rc in latest_lookup.columns:
+                val = row[rc]
+                if not np.isnan(val):
+                    rank_sums[code][rc] = val
+
     # 3. Build final output
     records = []
     for code in valid_codes:
@@ -313,8 +372,9 @@ def run_multi_quarter(config: dict, end_date: str) -> None:
     df_all = df_all[available].sort_values("final_score", ascending=False)
 
     # 4. Per-market selection
+    select_count = config.get("select_count", {"主板": 50, "创业板": 20, "科创板": 20})
     all_parts = []
-    for market, count in PER_MARKET_COUNTS.items():
+    for market, count in select_count.items():
         subset = df_all[df_all["market"] == market].head(count)
         all_parts.append(subset)
         logger.info(f"  {market}: selected {len(subset)}/{count}")
@@ -343,7 +403,7 @@ def main():
     load_dotenv()
 
     args = parse_args()
-    config = load_config(args.config)
+    config = load_config(args.config, args.strategy)
 
     log_cfg = config.get("logging", {})
     log_dir = config.get("paths", {}).get("log_dir", "./logs")

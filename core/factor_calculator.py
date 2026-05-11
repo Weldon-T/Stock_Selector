@@ -54,6 +54,65 @@ class FactorCalculator:
         )
         return pd.Series(ratio, index=df.index)
 
+    def _compute_short_reversal(self, df: pd.DataFrame, multi_daily: pd.DataFrame) -> pd.Series:
+        """5-day price reversal: negative of 5-day return. Higher = more bounce potential."""
+        if multi_daily is None or multi_daily.empty or "close" not in multi_daily.columns:
+            return pd.Series(np.nan, index=df.index)
+
+        results = {}
+        for code, group in multi_daily.groupby("ts_code"):
+            closes = group.sort_values("trade_date")["close"].values
+            if len(closes) >= 5:
+                ret_5d = (closes[-1] - closes[-5]) / closes[-5]
+                results[code] = -ret_5d
+            else:
+                results[code] = np.nan
+
+        rev = pd.Series(results, name="short_reversal")
+        rev.index.name = "ts_code"
+        return df[["ts_code"]].merge(rev, on="ts_code", how="left")["short_reversal"]
+
+    def _compute_amplitude(self, df: pd.DataFrame, multi_daily: pd.DataFrame) -> pd.Series:
+        """Average daily amplitude (high-low)/close over lookback window. Lower = more stable."""
+        if multi_daily is None or multi_daily.empty:
+            return pd.Series(np.nan, index=df.index)
+        if not all(c in multi_daily.columns for c in ["high", "low", "close"]):
+            return pd.Series(np.nan, index=df.index)
+
+        multi_daily = multi_daily.copy()
+        multi_daily["daily_amp"] = (multi_daily["high"] - multi_daily["low"]) / multi_daily["close"]
+        amp = multi_daily.groupby("ts_code")["daily_amp"].mean()
+        amp.name = "amplitude"
+        return df[["ts_code"]].merge(amp, on="ts_code", how="left")["amplitude"]
+
+    def _compute_short_momentum(self, df: pd.DataFrame, multi_daily: pd.DataFrame) -> pd.Series:
+        """3-day price momentum: positive return over last 3 days."""
+        if multi_daily is None or multi_daily.empty or "close" not in multi_daily.columns:
+            return pd.Series(np.nan, index=df.index)
+
+        results = {}
+        for code, group in multi_daily.groupby("ts_code"):
+            closes = group.sort_values("trade_date")["close"].values
+            if len(closes) >= 3:
+                ret_3d = (closes[-1] - closes[-3]) / closes[-3]
+                results[code] = ret_3d
+            else:
+                results[code] = np.nan
+
+        mom = pd.Series(results, name="short_momentum")
+        mom.index.name = "ts_code"
+        return df[["ts_code"]].merge(mom, on="ts_code", how="left")["short_momentum"]
+
+    def _compute_amount_stability(self, df: pd.DataFrame, multi_daily: pd.DataFrame) -> pd.Series:
+        """Coefficient of variation of daily trading amount. Lower = less manipulation risk."""
+        if multi_daily is None or multi_daily.empty or "amount" not in multi_daily.columns:
+            return pd.Series(np.nan, index=df.index)
+
+        grouped = multi_daily.groupby("ts_code")["amount"]
+        cv = grouped.std() / grouped.mean()
+        cv.name = "amount_stability"
+        return df[["ts_code"]].merge(cv, on="ts_code", how="left")["amount_stability"]
+
     def calculate(
         self,
         stock_list: pd.DataFrame,
@@ -113,6 +172,10 @@ class FactorCalculator:
         df = df.merge(daily_data[available_daily], on="ts_code", how="left")
         df["volume_ratio"] = self._compute_volume_ratio(df, multi_daily)
         df["volatility"] = self._compute_volatility(df, multi_daily)
+        df["short_reversal"] = self._compute_short_reversal(df, multi_daily)
+        df["short_momentum"] = self._compute_short_momentum(df, multi_daily)
+        df["amplitude"] = self._compute_amplitude(df, multi_daily)
+        df["amount_stability"] = self._compute_amount_stability(df, multi_daily)
 
         # --- Metadata ---
         df["financial_period"] = self._get_financial_period(trade_date)
@@ -125,7 +188,8 @@ class FactorCalculator:
 
         factor_names = ["ep_ttm", "bp", "roe_ttm", "gross_margin", "net_margin",
                         "revenue_yoy", "profit_yoy", "small_cap", "volume_ratio",
-                        "volatility"]
+                        "volatility", "short_reversal", "short_momentum",
+                        "amplitude", "amount_stability"]
         available = [f for f in factor_names if f in df.columns and df[f].notna().any()]
         self.logger.info(f"Factor calculation complete: {len(df)} stocks, "
                          f"factors with data: {available}")

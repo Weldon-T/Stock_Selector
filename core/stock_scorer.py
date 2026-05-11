@@ -7,7 +7,6 @@ from utils.logger import get_logger
 class StockScorer:
     def __init__(self, config: dict):
         self.config = config
-        self.select_count = config.get("select_count", 50)
         self.factors: list[dict] = []
         self.logger = get_logger()
         self._build_factor_config()
@@ -83,12 +82,3 @@ class StockScorer:
         """Compute ranks for all stocks without top-N truncation."""
         return self._compute_ranks(df, sector_neutral).reset_index(drop=True)
 
-    def score(self, df: pd.DataFrame, sector_neutral: bool = False) -> pd.DataFrame:
-        mode = "sector-neutral" if sector_neutral else "cross-market"
-        self.logger.info(f"Scoring {len(df)} stocks ({mode})...")
-
-        df = self._compute_ranks(df, sector_neutral)
-        df = df.head(self.select_count)
-
-        self.logger.info(f"Scoring complete: top {len(df)} stocks selected")
-        return df.reset_index(drop=True)

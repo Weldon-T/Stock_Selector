@@ -2,9 +2,10 @@
                     智能选股工具 PRD（Tushare免费版 + CSV输出）
 ================================================================================
 
-文档版本: V2.0
-修改日期: 2026-05-08
-变更说明: 根据免费token实测绘得的可用接口，重构因子体系为5维度9因子模型
+文档版本: V3.0
+修改日期: 2026-05-10
+变更说明: 小盘优选策略，13因子6维度。新增短期反转、日内振幅、成交额稳定性因子。
+        多季度聚合拆分为基本面(跨季平均)和技术面(仅用最新季)。分市场选股90只。
 
 ================================================================================
 1. 项目概述
@@ -37,34 +38,42 @@ moneyflow        资金流向                     不可用(需积分)
 2. 因子体系 (V2.0)
 ================================================================================
 
-2.1 价值维度 (25%)
+2.1 价值维度 (10%)
 因子         权重    方向    来源              说明
 ----------------------------------------------------------------
-ep_ttm       0.15    +       bak_basic.pe      1/PE，盈利收益率
-bp           0.10    +       bak_basic.pb      1/PB，净资产折价
+ep_ttm       0.06    +       bak_basic.pe      1/PE，盈利收益率
+bp           0.04    +       bak_basic.pb      1/PB，净资产折价
 
-2.2 质量维度 (35%)
+2.2 质量维度 (24%)
 因子         权重    方向    来源              说明
 ----------------------------------------------------------------
-roe_ttm      0.15    +       eps/bvps          股东回报率
-gross_margin 0.10    +       bak_basic.gpr     毛利率=定价权
-net_margin   0.10    +       bak_basic.npr     净利率=盈利质量
+roe_ttm      0.10    +       eps/bvps          股东回报率
+gross_margin 0.07    +       bak_basic.gpr     毛利率=定价权
+net_margin   0.07    +       bak_basic.npr     净利率=盈利质量
 
-2.3 成长维度 (20%)
+2.3 成长维度 (10%)
 因子         权重    方向    来源              说明
 ----------------------------------------------------------------
-revenue_yoy  0.10    +       bak_basic.rev_yoy     营收增速
-profit_yoy   0.10    +       bak_basic.profit_yoy  利润增速
+revenue_yoy  0.05    +       bak_basic.rev_yoy     营收增速
+profit_yoy   0.05    +       bak_basic.profit_yoy  利润增速
 
-2.4 规模维度 (10%)
+2.4 规模维度 (12%)
 因子         权重    方向    来源              说明
 ----------------------------------------------------------------
-small_cap    0.10    +       bak_basic.total_assets    -ln(总资产)，小盘溢价
+small_cap    0.12    +       bak_basic.total_assets    -ln(总资产)，小盘溢价
 
-2.5 技术维度 (10%)
-因子         权重    方向    来源              说明
+2.5 风险维度 (29%)
+因子              权重    方向    来源              说明
 ----------------------------------------------------------------
-volume_ratio 0.10    +       daily(多日vol)    量比=vol/avg_vol_5d
+volatility        0.12    -       daily(10日收盘)    年化波动率
+amplitude         0.07    -       daily(10日高低)    日内振幅均值，剔除投机股
+amount_stability  0.05    -       daily(10日成交额)  成交额变异系数，剔除操纵股
+volume_ratio      0.05    +       daily(10日量)      量比=vol/avg_vol_5d
+
+2.6 动量维度 (15%)
+因子              权重    方向    来源              说明
+----------------------------------------------------------------
+short_reversal    0.15    +       daily(10日收盘)    5日反转：-(close/close_5d_ago-1)
 
 ================================================================================
 3. 打分方法
@@ -73,8 +82,8 @@ volume_ratio 0.10    +       daily(多日vol)    量比=vol/avg_vol_5d
 - 每个因子在全市场内计算百分位排名(0~1)
 - 负向因子取 1-rank 转为正向得分
 - 加权得分：final_score = Σ(w_i × rank_i)
-- 按总分降序取前N只股票（默认50）
-- 当前版本为全市场排名，V2.1可增加行业内中性化
+- 按总分降序分市场取：主板50 + 创业板20 + 科创板20 = 90只
+- 排名支持行业内中性化（sector_neutral=True）和全市场排名两种模式
 
 ================================================================================
 4. 股票池过滤
@@ -83,6 +92,7 @@ volume_ratio 0.10    +       daily(多日vol)    量比=vol/avg_vol_5d
 - 剔除 ST、*ST（从名称正则匹配）
 - 剔除上市不足60天的股票（bak_basic.list_date）
 - 剔除当日停牌/无交易的股票（daily覆盖）
+- 剔除日均成交额 < 5000万的股票（流动性过滤）
 - 仅保留沪深主板、创业板、科创板（从ts_code推导market）
 
 ================================================================================
@@ -91,21 +101,29 @@ volume_ratio 0.10    +       daily(多日vol)    量比=vol/avg_vol_5d
 
 factors:
   value:
-    ep_ttm:          { weight: 0.15, enabled: true, direction: positive }
-    bp:              { weight: 0.10, enabled: true, direction: positive }
+    ep_ttm:             { weight: 0.06, enabled: true, direction: positive }
+    bp:                 { weight: 0.04, enabled: true, direction: positive }
   quality:
-    roe_ttm:         { weight: 0.15, enabled: true, direction: positive }
-    gross_margin:    { weight: 0.10, enabled: true, direction: positive }
-    net_margin:      { weight: 0.10, enabled: true, direction: positive }
+    roe_ttm:            { weight: 0.10, enabled: true, direction: positive }
+    gross_margin:       { weight: 0.07, enabled: true, direction: positive }
+    net_margin:         { weight: 0.07, enabled: true, direction: positive }
   growth:
-    revenue_yoy:     { weight: 0.10, enabled: true, direction: positive }
-    profit_yoy:      { weight: 0.10, enabled: true, direction: positive }
+    revenue_yoy:        { weight: 0.05, enabled: true, direction: positive }
+    profit_yoy:         { weight: 0.05, enabled: true, direction: positive }
   size:
-    small_cap:       { weight: 0.10, enabled: true, direction: positive }
-  technical:
-    volume_ratio:    { weight: 0.10, enabled: true, direction: positive }
+    small_cap:          { weight: 0.12, enabled: true, direction: positive }
+  risk:
+    volatility:         { weight: 0.12, enabled: true, direction: negative }
+    amplitude:          { weight: 0.07, enabled: true, direction: negative }
+    amount_stability:   { weight: 0.05, enabled: true, direction: negative }
+    volume_ratio:       { weight: 0.05, enabled: true, direction: positive }
+  momentum:
+    short_reversal:     { weight: 0.15, enabled: true, direction: positive }
 
-select_count: 50
+# 分市场选股（主板50 + 创业板20 + 科创板20 = 90）
+stock_pool:
+  markets: ["主板", "创业板", "科创板"]
+  min_daily_amount: 50000  # 流动性门槛 50M
 
 ================================================================================
 6. CSV输出格式
@@ -114,10 +132,11 @@ select_count: 50
 输出文件: 选股结果_YYYYMMDD.csv (UTF-8 BOM)
 
 主要列:
-ts_code, name, industry,
+ts_code, name, industry, market,
 ep_ttm, bp, roe_ttm, gross_margin, net_margin,
-revenue_yoy, profit_yoy, small_cap, volume_ratio,
-ep_ttm_rank, bp_rank, ..., volume_ratio_rank,
+revenue_yoy, profit_yoy, small_cap,
+volatility, amplitude, amount_stability, volume_ratio, short_reversal,
+ep_ttm_rank, bp_rank, ..., short_reversal_rank,
 final_score, financial_period
 
 ================================================================================
@@ -133,10 +152,10 @@ stock_selector/
 ├── core/
 │   ├── tushare_client.py    # API封装(限频感知重试)
 │   ├── data_loader.py       # 数据拉取+多日daily
-│   ├── filter.py            # 股票池过滤
-│   ├── factor_calculator.py # 因子计算
-│   ├── stock_scorer.py      # 百分位排名+加权打分
-│   └── backtest.py          # 回测模块(桩)
+│   ├── filter.py            # 股票池过滤(含流动性)
+│   ├── factor_calculator.py # 13因子计算(基本面+技术+动量)
+│   ├── stock_scorer.py      # 分行业百分位排名+加权打分
+│   └── backtest.py          # 季度调仓回测，公平基准
 └── utils/
     ├── cache.py             # SQLiteCache
     ├── date_utils.py
@@ -152,7 +171,9 @@ M2      基本面因子(PE/PB/ROE/成长)                ✅ 完成
 M2.5    因子体系重构(9因子,bak_basic驱动)         ✅ 完成
 M3      技术因子(volume_ratio)                    ✅ 完成
 M4      百分位打分+过滤+CSV输出+日志              ✅ 完成
-M5      回测模块+行业内中性化+文档                ⏳ 待实现
+M5      回测模块+行业内中性化+文档                ✅ 完成
+M6      小盘优选(反转+振幅+成交额稳定性,13因子)    ✅ 完成
+M6.1    多季度聚合拆分(基本面跨季/技术面单季)      ✅ 完成
 
 ================================================================================
                         文档结束
