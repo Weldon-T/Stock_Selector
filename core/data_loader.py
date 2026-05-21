@@ -23,9 +23,26 @@ class DataLoader:
 
         self.logger.info("Fetching stock_basic from Tushare")
         df = self.client.stock_basic(trade_date)
+        if df.empty and trade_date:
+            df = self._fallback_stock_basic(table, key, trade_date)
         if not df.empty:
             self.cache.put(table, key, df)
         return df
+
+    def _fallback_stock_basic(self, table: str, key: str, trade_date: str) -> pd.DataFrame:
+        """Walk back up to 5 calendar days to find a date with bak_basic data."""
+        from datetime import timedelta
+        dt = pd.to_datetime(trade_date, format="%Y%m%d")
+        for i in range(1, 6):
+            prev = (dt - timedelta(days=i)).strftime("%Y%m%d")
+            self.logger.info(f"bak_basic empty for {trade_date}, trying {prev}")
+            df = self.client.stock_basic(prev)
+            if not df.empty:
+                self.cache.put(table, prev, df)
+                self.logger.info(f"Using stock_basic from {prev} as fallback for {trade_date}")
+                return df
+        self.logger.warning(f"No stock_basic data found within 5 days of {trade_date}")
+        return pd.DataFrame()
 
     def load_daily_all(self, trade_date: str, force_refresh: bool = False) -> pd.DataFrame:
         table, key = "daily", trade_date

@@ -73,7 +73,7 @@ class TushareClient:
                 continue
 
             if attempt < max_retries - 1:
-                time.sleep(1)
+                time.sleep(35)  # respect 2/min rate limit on bak_basic
 
         return pd.DataFrame()
 
@@ -83,7 +83,7 @@ class TushareClient:
         params = {"fields": fields}
         if trade_date:
             params["trade_date"] = trade_date
-        df = self.request("bak_basic", **params)
+        df = self.request("bak_basic", max_retries=1, **params)
         if not df.empty:
             df["is_st"] = df["name"].str.match(r"^\*?ST", na=False).astype(int)
             df["symbol"] = df["ts_code"].str.replace(r"\.(SZ|SH|BJ)$", "", regex=True)
