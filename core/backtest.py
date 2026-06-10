@@ -54,6 +54,7 @@ class Backtest:
     def __init__(self, config: dict):
         bt_cfg = config.get("backtest", {})
         self.hold_months = bt_cfg.get("hold_months", 3)
+        self.hold_days = bt_cfg.get("hold_days", 0)
         self.config = config
         self.logger = get_logger()
 
@@ -200,8 +201,9 @@ class Backtest:
 
     def run(self, start_date: str, end_date: str) -> pd.DataFrame:
         logger = self.logger
+        hold_label = f"{self.hold_days}d" if self.hold_days else f"{self.hold_months}mo"
         logger.info(f"=== Backtest: {format_date(start_date)} ~ {format_date(end_date)}, "
-                     f"hold={self.hold_months}mo ===")
+                     f"hold={hold_label} ===")
 
         cache_dir = self.config.get("paths", {}).get("cache_dir", "./cache")
         cache = SQLiteCache(cache_dir)
@@ -215,20 +217,27 @@ class Backtest:
         factor_calc = FactorCalculator(self.config)
         scorer = StockScorer(self.config)
 
-        # Generate rebalancing dates at hold_months intervals
+        # Generate rebalancing dates
         rebalance_dates = []
         dt = pd.to_datetime(start_date, format="%Y%m%d")
         end_dt = pd.to_datetime(end_date, format="%Y%m%d")
-        while dt <= end_dt:
-            # End of current month as target; resolve to nearest trade date
-            month_end = dt + pd.offsets.MonthEnd(0)
-            d_str = month_end.strftime("%Y%m%d")
-            if d_str >= start_date:
+
+        if self.hold_days:
+            while dt <= end_dt:
+                d_str = dt.strftime("%Y%m%d")
                 resolved = _resolve_date(loader, d_str)
                 if resolved and resolved not in rebalance_dates:
                     rebalance_dates.append(resolved)
-            # Advance to first day of next interval
-            dt = month_end + pd.DateOffset(months=self.hold_months - 1, days=1)
+                dt += pd.DateOffset(days=self.hold_days)
+        else:
+            while dt <= end_dt:
+                month_end = dt + pd.offsets.MonthEnd(0)
+                d_str = month_end.strftime("%Y%m%d")
+                if d_str >= start_date:
+                    resolved = _resolve_date(loader, d_str)
+                    if resolved and resolved not in rebalance_dates:
+                        rebalance_dates.append(resolved)
+                dt = month_end + pd.DateOffset(months=self.hold_months - 1, days=1)
 
         logger.info(f"Rebalance dates: {[format_date(d) for d in rebalance_dates]}")
 
@@ -245,7 +254,8 @@ class Backtest:
 
             # Determine forward date
             rb_dt = pd.to_datetime(rb_date, format="%Y%m%d")
-            fwd_dt = rb_dt + pd.DateOffset(months=self.hold_months)
+            fwd_dt = rb_dt + (pd.DateOffset(days=self.hold_days) if self.hold_days
+                               else pd.DateOffset(months=self.hold_months))
             fwd_str = fwd_dt.strftime("%Y%m%d")
             fwd_date = _resolve_date(loader, fwd_str)
             if not fwd_date:
@@ -300,14 +310,17 @@ class Backtest:
 
         # Annualized
         n_periods = len(port_returns)
-        years = n_periods * self.hold_months / 12
+        years = n_periods * self.hold_days / 365 if self.hold_days else n_periods * self.hold_months / 12
         port_ann = (1 + port_cum) ** (1 / years) - 1 if years > 0 else 0
         bench_ann = (1 + bench_cum) ** (1 / years) - 1 if years > 0 else 0
 
         # Sharpe ratio (annualized from per-period returns)
-        rf_per_period = 0.02 * self.hold_months / 12  # 2% annual risk-free
-        excess = port_returns - rf_per_period
-        periods_per_year = 12 / self.hold_months
+        if self.hold_days:
+            rf_per_period = 0.02 * self.hold_days / 365
+            periods_per_year = 365 / self.hold_days
+        else:
+            rf_per_period = 0.02 * self.hold_months / 12
+            periods_per_year = 12 / self.hold_months
         sharpe = np.mean(excess) / np.std(excess) * np.sqrt(periods_per_year) if np.std(excess) > 0 else 0
 
         # Max drawdown
@@ -327,7 +340,10 @@ class Backtest:
         print("  BACKTEST RESULTS")
         print("=" * 60)
         print(f"  Periods:              {n_periods} quarters")
-        print(f"  Hold per period:      {self.hold_months} months")
+        if self.hold_days:
+            print(f"  Hold per period:      {self.hold_days} days")
+        else:
+            print(f"  Hold per period:      {self.hold_months} months")
         print(f"  Time span:            {years:.1f} years")
         print(f"  Portfolio cumulative: {port_cum:.2%}")
         print(f"  Benchmark cumulative: {bench_cum:.2%}")

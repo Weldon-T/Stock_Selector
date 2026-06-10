@@ -118,43 +118,56 @@ def _resolve_strategy(config: dict, strategy: str | None) -> None:
     if "hold_months" in profile:
         config.setdefault("backtest", {})
         config["backtest"]["hold_months"] = profile["hold_months"]
+    if "hold_days" in profile:
+        config.setdefault("backtest", {})
+        config["backtest"]["hold_days"] = profile["hold_days"]
 
 
 # ============================================================================
 # Single-date pipeline
 # ============================================================================
 
+def _get_top_industry_etfs(df_result: pd.DataFrame, config: dict, top_n: int = 8) -> list[dict]:
+    """Extract top N industries from results and map to ETFs."""
+    if "industry" not in df_result.columns:
+        return []
+
+    industry_etf_map = config.get("industry_etf_map", {})
+    if not industry_etf_map:
+        return []
+
+    # Count stocks per industry in top results, keep top N
+    top_industries = df_result["industry"].value_counts().head(top_n).index.tolist()
+
+    etf_rows = []
+    seen = set()
+    for ind in top_industries:
+        etfs = industry_etf_map.get(ind, [])
+        for etf in etfs:
+            key = etf["code"]
+            if key not in seen:
+                seen.add(key)
+                etf_rows.append({"热门行业": ind, "代码": etf["code"], "名称": etf["name"]})
+    return etf_rows
+
+
 def _write_results(df_result: pd.DataFrame, config: dict, trade_date: str,
                    suffix: str = "") -> Path:
     """Write results to Excel with two tabs: 选股结果 + ETF推荐."""
     output_dir = Path(config.get("paths", {}).get("output_dir", "./output"))
     output_dir.mkdir(parents=True, exist_ok=True)
-    strategy = config.get("_strategy_name", "unknown")
 
     filename = f"选股结果_{trade_date}"
     if suffix:
         filename += f"_{suffix}"
     output_path = output_dir / f"{filename}.xlsx"
 
+    etf_rows = _get_top_industry_etfs(df_result, config)
+
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        # Tab 1: stock picks
         df_result.to_excel(writer, sheet_name="选股结果", index=False)
-
-        # Tab 2: ETF recommendations
-        etf_map = config.get("etf_recommendations", {})
-        strategy_to_category = {
-            "growth": "growth", "smallcap": "growth",
-            "defensive": "defensive", "value": "defensive",
-        }
-        category = strategy_to_category.get(strategy, "defensive")
-        recs = etf_map.get(category, {})
-
-        etf_rows = []
-        for sector, funds in recs.items():
-            for f in funds:
-                etf_rows.append({"板块": sector, "代码": f["code"], "名称": f["name"]})
-        etf_df = pd.DataFrame(etf_rows)
-        etf_df.to_excel(writer, sheet_name="ETF推荐", index=False)
+        if etf_rows:
+            pd.DataFrame(etf_rows).to_excel(writer, sheet_name="ETF推荐", index=False)
 
     logger = get_logger()
     logger.info(f"Results saved to: {output_path} ({len(df_result)} stocks, {len(etf_rows)} ETFs)")
@@ -173,32 +186,18 @@ def _print_top10(df: pd.DataFrame, label: str) -> None:
     print(f"Total selected: {len(df)} stocks\n")
 
 
-def _print_etf_recommendations(config: dict) -> None:
-    """Print ETF recommendations based on current strategy."""
-    strategy = config.get("_strategy_name", "")
-    etf_map = config.get("etf_recommendations", {})
-
-    # Map strategy to ETF category
-    strategy_to_category = {
-        "growth": "growth",
-        "smallcap": "growth",
-        "defensive": "defensive",
-        "value": "defensive",
-    }
-    category = strategy_to_category.get(strategy, "defensive")
-    recommendations = etf_map.get(category, {})
-
-    if not recommendations:
+def _print_etf_recommendations(df_result: pd.DataFrame, config: dict) -> None:
+    """Print ETF recommendations based on actual top industries in results."""
+    etf_rows = _get_top_industry_etfs(df_result, config)
+    if not etf_rows:
         return
 
     print("=" * 70)
-    print(f"  Recommended ETFs — {category} line ({strategy} strategy)")
+    print("  Recommended ETFs — based on top industries in results")
     print("=" * 70)
-    for sector, funds in recommendations.items():
-        for f in funds:
-            print(f"  {f['code']}  {f['name']:<16s}  ({sector})")
+    for r in etf_rows:
+        print(f"  {r['代码']}  {r['名称']:<16s}  ({r['热门行业']})")
     print("-" * 70)
-    print(f"  Strategy: {strategy} | Category: {category}\n")
 
 
 def run_pipeline(config: dict, trade_date: str) -> None:
@@ -249,6 +248,7 @@ def run_pipeline(config: dict, trade_date: str) -> None:
 
     _write_results(df_result, config, trade_date)
     _print_top10(df_result, format_date(trade_date))
+    _print_etf_recommendations(df_result, config)
 
 
 # ============================================================================
@@ -530,21 +530,29 @@ def run_compare(config: dict, trade_date: str) -> None:
         logger.error("No strategy produced results. Aborting.")
         sys.exit(1)
 
-    # Write single Excel with per-strategy tabs + combined ETF tab
+    # Write single Excel with per-strategy tabs + ETF tab
     output_path = output_dir / f"选股对比_{trade_date}.xlsx"
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        etf_tabs = {}
         for strategy_name, (df_result, _) in results.items():
             tab_name = "进攻型_growth" if strategy_name == "growth" else "防御型_defensive"
             df_result.to_excel(writer, sheet_name=tab_name, index=False)
 
-        # ETF tab: both lines
-        etf_rows = []
-        etf_map = config.get("etf_recommendations", {})
-        for line, label in [("growth", "进攻型"), ("defensive", "防御型")]:
-            for sector, funds in etf_map.get(line, {}).items():
-                for f in funds:
-                    etf_rows.append({"线路": label, "板块": sector, "代码": f["code"], "名称": f["name"]})
-        pd.DataFrame(etf_rows).to_excel(writer, sheet_name="ETF推荐", index=False)
+            # Per-strategy ETF recommendations from actual top industries
+            strategy_etfs = _get_top_industry_etfs(df_result, config)
+            if strategy_etfs:
+                etf_tabs[strategy_name] = pd.DataFrame(strategy_etfs)
+
+        # ETF tab: side by side per strategy
+        if etf_tabs:
+            etf_sheet_name = "ETF推荐"
+            start_col = 0
+            for sn, etf_df in etf_tabs.items():
+                label_map = {"growth": "进攻型", "defensive": "防御型"}
+                header = pd.DataFrame({f"── {label_map.get(sn, sn)} ──": []})
+                header.to_excel(writer, sheet_name=etf_sheet_name, index=False, startcol=start_col)
+                etf_df.to_excel(writer, sheet_name=etf_sheet_name, index=False, startcol=start_col, startrow=1)
+                start_col += len(etf_df.columns) + 1
 
     logger.info(f"Comparison saved to: {output_path}")
     print(f"\n  Comparison Excel: {output_path}")

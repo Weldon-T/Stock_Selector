@@ -20,53 +20,169 @@ multi_daily_lookback: 25
 strategy: value
 
 # ============================================================================
-# ETF Recommendations — suggested funds per strategy line
+# Industry → ETF mapping (used to recommend ETFs based on actual top industries)
 # ============================================================================
-etf_recommendations:
-  growth:
-    科创板:
-      - {code: "588000", name: "科创50ETF"}
-      - {code: "588080", name: "科创板50ETF"}
-    半导体芯片:
-      - {code: "512480", name: "半导体ETF"}
-      - {code: "159995", name: "芯片ETF"}
-    人工智能:
-      - {code: "159819", name: "人工智能ETF"}
-      - {code: "159729", name: "AI智能ETF"}
-    机器人:
-      - {code: "562500", name: "机器人ETF"}
-    计算机通信:
-      - {code: "512720", name: "计算机ETF"}
-      - {code: "515880", name: "通信ETF"}
-    新能源:
-      - {code: "515030", name: "新能源车ETF"}
-      - {code: "516160", name: "新能源ETF"}
-    军工:
-      - {code: "512660", name: "军工ETF"}
-    传媒游戏:
-      - {code: "159869", name: "游戏ETF"}
-      - {code: "512980", name: "传媒ETF"}
-
-  defensive:
-    红利高股息:
-      - {code: "510880", name: "红利ETF"}
-      - {code: "515080", name: "中证红利ETF"}
-      - {code: "512590", name: "高股息ETF"}
-    银行:
-      - {code: "512800", name: "银行ETF"}
-      - {code: "515290", name: "银行龙头ETF"}
-    消费:
-      - {code: "159928", name: "消费ETF"}
-      - {code: "515170", name: "食品饮料ETF"}
-    医药:
-      - {code: "512010", name: "医药ETF"}
-      - {code: "159859", name: "生物医药ETF"}
-    公用事业:
-      - {code: "561560", name: "电力ETF"}
-      - {code: "516970", name: "基建ETF"}
-    央企国企:
-      - {code: "510060", name: "央企ETF"}
-      - {code: "512960", name: "国企改革ETF"}
+industry_etf_map:
+  半导体:
+    - {code: "512480", name: "半导体ETF"}
+    - {code: "159995", name: "芯片ETF"}
+  元器件:
+    - {code: "159995", name: "芯片ETF"}
+    - {code: "512720", name: "计算机ETF"}
+  软件服务:
+    - {code: "159819", name: "人工智能ETF"}
+    - {code: "512720", name: "计算机ETF"}
+  通信设备:
+    - {code: "515880", name: "通信ETF"}
+    - {code: "515050", name: "5GETF"}
+  银行:
+    - {code: "512800", name: "银行ETF"}
+    - {code: "515290", name: "银行龙头ETF"}
+  化学制药:
+    - {code: "512010", name: "医药ETF"}
+    - {code: "159859", name: "生物医药ETF"}
+  生物制药:
+    - {code: "159859", name: "生物医药ETF"}
+    - {code: "512010", name: "医药ETF"}
+  中成药:
+    - {code: "512010", name: "医药ETF"}
+    - {code: "159859", name: "生物医药ETF"}
+  医疗保健:
+    - {code: "512170", name: "医疗ETF"}
+    - {code: "512010", name: "医药ETF"}
+  白酒:
+    - {code: "512690", name: "酒ETF"}
+    - {code: "515170", name: "食品饮料ETF"}
+  食品:
+    - {code: "515170", name: "食品饮料ETF"}
+    - {code: "159928", name: "消费ETF"}
+  饮料:
+    - {code: "515170", name: "食品饮料ETF"}
+    - {code: "159928", name: "消费ETF"}
+  服饰:
+    - {code: "159928", name: "消费ETF"}
+  家用电器:
+    - {code: "159996", name: "家电ETF"}
+  汽车整车:
+    - {code: "515030", name: "新能源车ETF"}
+    - {code: "516110", name: "汽车ETF"}
+  汽车配件:
+    - {code: "515030", name: "新能源车ETF"}
+    - {code: "516110", name: "汽车ETF"}
+  电气设备:
+    - {code: "516160", name: "新能源ETF"}
+    - {code: "515030", name: "新能源车ETF"}
+  专用机械:
+    - {code: "562500", name: "机器人ETF"}
+    - {code: "159638", name: "高端装备ETF"}
+  通用机械:
+    - {code: "159638", name: "高端装备ETF"}
+  工业机械:
+    - {code: "159638", name: "高端装备ETF"}
+  航空:
+    - {code: "512660", name: "军工ETF"}
+  船舶:
+    - {code: "512660", name: "军工ETF"}
+  煤炭开采:
+    - {code: "515220", name: "煤炭ETF"}
+  矿物制品:
+    - {code: "515220", name: "煤炭ETF"}
+  小金属:
+    - {code: "159871", name: "有色金属ETF"}
+  黄金:
+    - {code: "518880", name: "黄金ETF"}
+  铜:
+    - {code: "159871", name: "有色金属ETF"}
+  铝:
+    - {code: "159871", name: "有色金属ETF"}
+  铅锌:
+    - {code: "159871", name: "有色金属ETF"}
+  火力发电:
+    - {code: "561560", name: "电力ETF"}
+  水力发电:
+    - {code: "561560", name: "电力ETF"}
+  新型电力:
+    - {code: "561560", name: "电力ETF"}
+    - {code: "516160", name: "新能源ETF"}
+  建筑施工:
+    - {code: "516970", name: "基建ETF"}
+  玻璃:
+    - {code: "516970", name: "基建ETF"}
+  陶瓷:
+    - {code: "516970", name: "基建ETF"}
+  水泥:
+    - {code: "516970", name: "基建ETF"}
+  全国地产:
+    - {code: "512200", name: "房地产ETF"}
+  区域地产:
+    - {code: "512200", name: "房地产ETF"}
+  仓储物流:
+    - {code: "516530", name: "物流ETF"}
+  运输服务:
+    - {code: "516530", name: "物流ETF"}
+  证券:
+    - {code: "512880", name: "证券ETF"}
+    - {code: "512000", name: "券商ETF"}
+  保险:
+    - {code: "512070", name: "证券保险ETF"}
+  多元金融:
+    - {code: "512070", name: "证券保险ETF"}
+  互联网:
+    - {code: "159729", name: "AI智能ETF"}
+    - {code: "513050", name: "中概互联ETF"}
+  影视音像:
+    - {code: "159869", name: "游戏ETF"}
+    - {code: "512980", name: "传媒ETF"}
+  出版业:
+    - {code: "512980", name: "传媒ETF"}
+  文教休闲:
+    - {code: "512980", name: "传媒ETF"}
+  旅游景点:
+    - {code: "562510", name: "旅游ETF"}
+  酒店餐饮:
+    - {code: "562510", name: "旅游ETF"}
+  超市连锁:
+    - {code: "159928", name: "消费ETF"}
+  种植业:
+    - {code: "159825", name: "农业ETF"}
+  渔业:
+    - {code: "159825", name: "农业ETF"}
+  饲料:
+    - {code: "159825", name: "农业ETF"}
+  化工原料:
+    - {code: "516020", name: "化工ETF"}
+  农药化肥:
+    - {code: "516020", name: "化工ETF"}
+  塑料:
+    - {code: "516020", name: "化工ETF"}
+  橡胶:
+    - {code: "516020", name: "化工ETF"}
+  化纤:
+    - {code: "516020", name: "化工ETF"}
+  染料涂料:
+    - {code: "516020", name: "化工ETF"}
+  环境保护:
+    - {code: "516890", name: "环保ETF"}
+  供气供热:
+    - {code: "516890", name: "环保ETF"}
+  钢加工:
+    - {code: "515210", name: "钢铁ETF"}
+  普钢:
+    - {code: "515210", name: "钢铁ETF"}
+  特种钢:
+    - {code: "515210", name: "钢铁ETF"}
+  水泥:
+    - {code: "516970", name: "基建ETF"}
+  石油开采:
+    - {code: "159930", name: "能源ETF"}
+  石油加工:
+    - {code: "159930", name: "能源ETF"}
+  造纸:
+    - {code: "516020", name: "化工ETF"}
+  纺织:
+    - {code: "159928", name: "消费ETF"}
+  综合类:
+    - {code: "510500", name: "中证500ETF"}
 
 # ============================================================================
 # Strategy Profiles
@@ -78,7 +194,7 @@ strategies:
   # 进攻型：行业动量 + 个股趋势 + 放量确认，月度调仓
   # --------------------------------------------------------------------------
   growth:
-    hold_months: 1
+    hold_days: 5       # weekly rebalance — momentum signals decay fast
 
     select_count:
       主板: 40
