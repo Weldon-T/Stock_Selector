@@ -79,7 +79,8 @@ class TushareClient:
 
     def stock_basic(self, trade_date: str = "") -> pd.DataFrame:
         fields = ("trade_date,ts_code,name,industry,area,list_date,"
-                   "pe,pb,eps,bvps,gpr,npr,rev_yoy,profit_yoy,total_assets")
+                   "pe,pb,eps,bvps,gpr,npr,rev_yoy,profit_yoy,total_assets,"
+                   "dv_ratio")
         params = {"fields": fields}
         if trade_date:
             params["trade_date"] = trade_date

@@ -7,7 +7,10 @@ import pytest
 from core.stock_scorer import StockScorer
 
 
-TECH_FACTORS = {"short_reversal", "short_momentum", "volatility", "amplitude", "amount_stability", "volume_ratio"}
+TECH_FACTORS = {"short_reversal", "short_momentum", "volatility", "amplitude",
+                "amount_stability", "volume_ratio",
+                "sector_momentum", "price_momentum", "volume_breakout",
+                "industry_hotness", "mf_ratio"}
 
 
 def simulate_aggregation(quarter_dfs, factor_names, quarter_weights=None):
@@ -127,3 +130,19 @@ class TestMultiQuarterAggregation:
         dfs = make_quarter_df("volume_ratio", [1.5, 1.2, 0.9, 1.1])
         _, values = simulate_aggregation(dfs, ["volume_ratio"])
         assert values["volume_ratio"] == pytest.approx(1.1, abs=0.001)
+
+    def test_sector_momentum_is_technical(self):
+        dfs = make_quarter_df("sector_momentum", [0.3, 0.5, 0.7, 0.9])
+        _, values = simulate_aggregation(dfs, ["sector_momentum"])
+        # Latest quarter only: 0.9, not weighted avg = 0.64
+        assert values["sector_momentum"] == pytest.approx(0.9, abs=0.001)
+
+    def test_price_momentum_is_technical(self):
+        dfs = make_quarter_df("price_momentum", [0.05, -0.02, 0.10, 0.15])
+        _, values = simulate_aggregation(dfs, ["price_momentum"])
+        assert values["price_momentum"] == pytest.approx(0.15, abs=0.001)
+
+    def test_volume_breakout_is_technical(self):
+        dfs = make_quarter_df("volume_breakout", [0.8, 1.2, 0.9, 1.5])
+        _, values = simulate_aggregation(dfs, ["volume_breakout"])
+        assert values["volume_breakout"] == pytest.approx(1.5, abs=0.001)

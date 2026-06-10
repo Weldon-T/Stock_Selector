@@ -117,10 +117,12 @@ class DataLoader:
                 df = self.cache.get(table, key)
             else:
                 self.logger.info(f"Fetching daily for {date_str}")
-                df = self.client.daily(date_str)
-                if not df.empty:
+                df = self.client.request("daily", max_retries=1, trade_date=date_str)
+                if df is not None and not df.empty:
                     self.cache.put(table, key, df)
-                time.sleep(0.3)
+                    time.sleep(0.3)
+                else:
+                    df = pd.DataFrame()
 
             if df is not None and not df.empty:
                 frames.append(df)

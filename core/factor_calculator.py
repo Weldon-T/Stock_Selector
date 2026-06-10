@@ -103,34 +103,85 @@ class FactorCalculator:
         mom.index.name = "ts_code"
         return df[["ts_code"]].merge(mom, on="ts_code", how="left")["short_momentum"]
 
-    def _compute_industry_hotness(self, df: pd.DataFrame, moneyflow: pd.DataFrame | None) -> pd.Series:
-        """Industry-level capital flow hotness: 5-day net main force inflow / total buy amount.
-        Each stock gets its industry's percentile rank across all industries."""
-        if moneyflow is None or moneyflow.empty:
+    def _compute_industry_hotness(self, df: pd.DataFrame, multi_daily: pd.DataFrame | None,
+                                  days: int = 10) -> pd.Series:
+        """Industry hotness: median N-day return by industry, percentile ranked.
+        Uses price data already in cache — no extra API call needed."""
+        if multi_daily is None or multi_daily.empty or "close" not in multi_daily.columns:
             return pd.Series(np.nan, index=df.index)
 
-        buy_cols = ["buy_sm_amount", "buy_md_amount", "buy_lg_amount", "buy_elg_amount"]
-        available_buy = [c for c in buy_cols if c in moneyflow.columns]
-        if not available_buy or "net_mf_amount" not in moneyflow.columns:
+        stock_ret = self._n_day_return(multi_daily, days)
+        merged = df[["ts_code", "industry"]].merge(
+            stock_ret.rename("ret"), on="ts_code", how="left")
+
+        industry_ret = merged.groupby("industry")["ret"].median()
+        industry_rank = industry_ret.rank(pct=True)
+        self.logger.info(f"Industry hotness ({days}d): {len(industry_ret)} industries, "
+                         f"top3={industry_ret.nlargest(3).to_dict()}")
+
+        return df["industry"].map(industry_rank)
+
+    def _compute_sector_momentum(self, df: pd.DataFrame, multi_daily: pd.DataFrame | None,
+                                 days: int = 20) -> pd.Series:
+        """20-day industry median return, percentile ranked. Longer lookback for trend."""
+        if multi_daily is None or multi_daily.empty or "close" not in multi_daily.columns:
             return pd.Series(np.nan, index=df.index)
 
-        mf = moneyflow.copy()
-        mf["total_buy"] = mf[available_buy].sum(axis=1)
+        stock_ret = self._n_day_return(multi_daily, days)
+        merged = df[["ts_code", "industry"]].merge(
+            stock_ret.rename("ret"), on="ts_code", how="left")
 
-        stock_flow = mf.groupby("ts_code").agg({"net_mf_amount": "sum", "total_buy": "sum"})
-        merged = df[["ts_code", "industry"]].merge(stock_flow, on="ts_code", how="left")
+        industry_ret = merged.groupby("industry")["ret"].median()
+        industry_rank = industry_ret.rank(pct=True)
+        self.logger.info(f"Sector momentum ({days}d): top3={industry_ret.nlargest(3).to_dict()}")
 
-        industry_flow = merged.groupby("industry").agg({"net_mf_amount": "sum", "total_buy": "sum"})
-        industry_flow["hotness"] = np.where(
-            industry_flow["total_buy"] > 0,
-            industry_flow["net_mf_amount"] / industry_flow["total_buy"],
-            np.nan,
+        return df["industry"].map(industry_rank)
+
+    def _compute_price_momentum(self, df: pd.DataFrame, multi_daily: pd.DataFrame | None,
+                                days: int = 20) -> pd.Series:
+        """Individual stock N-day return. Higher = stronger uptrend."""
+        if multi_daily is None or multi_daily.empty or "close" not in multi_daily.columns:
+            return pd.Series(np.nan, index=df.index)
+
+        ret = self._n_day_return(multi_daily, days)
+        ret.name = "price_momentum"
+        return df[["ts_code"]].merge(ret, on="ts_code", how="left")["price_momentum"]
+
+    def _compute_volume_breakout(self, df: pd.DataFrame, multi_daily: pd.DataFrame | None,
+                                 days: int = 10) -> pd.Series:
+        """Recent volume / N-day average volume. >1 = volume expansion (hot money interest)."""
+        if multi_daily is None or multi_daily.empty or "vol" not in multi_daily.columns:
+            return pd.Series(np.nan, index=df.index)
+
+        md = multi_daily.sort_values(["ts_code", "trade_date"])
+        avg_vol = md.groupby("ts_code")["vol"].apply(
+            lambda x: x.tail(days).mean() if len(x) >= days else x.mean()
         )
-        industry_flow["rank"] = industry_flow["hotness"].rank(pct=True)
-        self.logger.info(f"Industry hotness: {len(industry_flow)} industries ranked, "
-                         f"top3={industry_flow['hotness'].nlargest(3).index.tolist()}")
+        latest_vol = md.groupby("ts_code")["vol"].last()
 
-        return df["industry"].map(industry_flow["rank"])
+        # Avoid div-by-zero: where avg_vol is 0, use NaN
+        ratio = latest_vol / avg_vol.replace(0, np.nan)
+        ratio.name = "volume_breakout"
+        self.logger.info(f"Volume breakout: median={ratio.median():.2f}, "
+                         f"p90={ratio.quantile(0.9):.2f}")
+        return df[["ts_code"]].merge(ratio, on="ts_code", how="left")["volume_breakout"]
+
+    @staticmethod
+    def _n_day_return(multi_daily: pd.DataFrame, days: int) -> pd.Series:
+        """Per-stock N-day close return from multi_daily data."""
+        results = {}
+        for code, group in multi_daily.groupby("ts_code"):
+            closes = group.sort_values("trade_date")["close"].values
+            if len(closes) >= days + 1:
+                results[code] = (closes[-1] - closes[-days - 1]) / closes[-days - 1]
+            elif len(closes) >= 2:
+                results[code] = (closes[-1] - closes[0]) / closes[0]
+            else:
+                results[code] = np.nan
+
+        ret = pd.Series(results, name="n_day_ret")
+        ret.index.name = "ts_code"
+        return ret
 
     def _compute_mf_ratio(self, df: pd.DataFrame, moneyflow: pd.DataFrame | None) -> pd.Series:
         """Individual stock 5-day net main force inflow / total buy amount."""
@@ -174,7 +225,7 @@ class FactorCalculator:
         self.logger.info(f"Calculating factors for trade_date={trade_date}")
 
         base_cols = ["ts_code", "name", "industry", "market"]
-        bak_cols = ["pe", "pb", "eps", "bvps", "gpr", "npr", "rev_yoy", "profit_yoy", "total_assets"]
+        bak_cols = ["pe", "pb", "eps", "bvps", "gpr", "npr", "rev_yoy", "profit_yoy", "total_assets", "dv_ratio"]
         available_bak = [c for c in bak_cols if c in stock_list.columns]
         df = stock_list[base_cols + available_bak].copy()
 
@@ -217,6 +268,12 @@ class FactorCalculator:
         else:
             df["small_cap"] = np.nan
 
+        # --- Dividend yield ---
+        if "dv_ratio" in df.columns:
+            df["dividend_yield"] = df["dv_ratio"]
+        else:
+            df["dividend_yield"] = np.nan
+
         # --- Technical: volume_ratio from daily data ---
         daily_cols = ["ts_code", "vol", "amount"]
         available_daily = [c for c in daily_cols if c in daily_data.columns]
@@ -228,9 +285,15 @@ class FactorCalculator:
         df["amplitude"] = self._compute_amplitude(df, multi_daily)
         df["amount_stability"] = self._compute_amount_stability(df, multi_daily)
 
-        # --- Flow: industry hotness + individual moneyflow ratio ---
-        df["industry_hotness"] = self._compute_industry_hotness(df, moneyflow)
+        # --- Price-based hotness: industry level ---
+        df["industry_hotness"] = self._compute_industry_hotness(df, multi_daily, days=10)
+        # --- Moneyflow-based ratio (kept for backward compat; returns NaN when no data) ---
         df["mf_ratio"] = self._compute_mf_ratio(df, moneyflow)
+
+        # --- Growth/momentum factors for offensive strategies ---
+        df["sector_momentum"] = self._compute_sector_momentum(df, multi_daily, days=20)
+        df["price_momentum"] = self._compute_price_momentum(df, multi_daily, days=20)
+        df["volume_breakout"] = self._compute_volume_breakout(df, multi_daily, days=10)
 
         # --- Metadata ---
         df["financial_period"] = self._get_financial_period(trade_date)
@@ -242,10 +305,12 @@ class FactorCalculator:
         df.drop(columns=drop_raw, inplace=True, errors="ignore")
 
         factor_names = ["ep_ttm", "bp", "roe_ttm", "gross_margin", "net_margin",
-                        "revenue_yoy", "profit_yoy", "small_cap", "volume_ratio",
+                        "revenue_yoy", "profit_yoy", "small_cap", "dividend_yield",
+                        "volume_ratio",
                         "volatility", "short_reversal", "short_momentum",
                         "amplitude", "amount_stability",
-                        "industry_hotness", "mf_ratio"]
+                        "industry_hotness", "mf_ratio",
+                        "sector_momentum", "price_momentum", "volume_breakout"]
         available = [f for f in factor_names if f in df.columns and df[f].notna().any()]
         self.logger.info(f"Factor calculation complete: {len(df)} stocks, "
                          f"factors with data: {available}")

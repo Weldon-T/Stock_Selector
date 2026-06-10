@@ -62,7 +62,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--strategy", type=str, default=None,
-        help="Strategy profile: value or smallcap (default: from config.yaml)",
+        help="Strategy: growth | defensive | value | smallcap (default: from config.yaml)",
     )
     return parser.parse_args()
 
@@ -104,6 +104,7 @@ def _resolve_strategy(config: dict, strategy: str | None) -> None:
         sys.exit(1)
 
     profile = strategies[name]
+    config["_strategy_name"] = name
     for key in ("factors", "stock_pool", "select_count"):
         if key in profile:
             config[key] = profile[key]
@@ -126,6 +127,34 @@ def _print_top10(df: pd.DataFrame, label: str) -> None:
     print(top10.to_string(index=False))
     print("-" * 70)
     print(f"Total selected: {len(df)} stocks\n")
+
+
+def _print_etf_recommendations(config: dict) -> None:
+    """Print ETF recommendations based on current strategy."""
+    strategy = config.get("_strategy_name", "")
+    etf_map = config.get("etf_recommendations", {})
+
+    # Map strategy to ETF category
+    strategy_to_category = {
+        "growth": "growth",
+        "smallcap": "growth",
+        "defensive": "defensive",
+        "value": "defensive",
+    }
+    category = strategy_to_category.get(strategy, "defensive")
+    recommendations = etf_map.get(category, {})
+
+    if not recommendations:
+        return
+
+    print("=" * 70)
+    print(f"  Recommended ETFs — {category} line ({strategy} strategy)")
+    print("=" * 70)
+    for sector, funds in recommendations.items():
+        for f in funds:
+            print(f"  {f['code']}  {f['name']:<16s}  ({sector})")
+    print("-" * 70)
+    print(f"  Strategy: {strategy} | Category: {category}\n")
 
 
 def run_pipeline(config: dict, trade_date: str) -> None:
@@ -180,6 +209,7 @@ def run_pipeline(config: dict, trade_date: str) -> None:
     df_result.to_csv(output_path, index=False, encoding="utf-8-sig")
     logger.info(f"Results saved to: {output_path} ({len(df_result)} stocks)")
     _print_top10(df_result, format_date(trade_date))
+    _print_etf_recommendations(config)
 
 
 # ============================================================================
@@ -324,7 +354,10 @@ def run_multi_quarter(config: dict, end_date: str) -> None:
             weight_sums[code] += w
 
     # Overwrite technical factors with latest quarter only
-    TECH_FACTORS = {"short_reversal", "short_momentum", "volatility", "amplitude", "amount_stability", "volume_ratio"}
+    TECH_FACTORS = {"short_reversal", "short_momentum", "volatility", "amplitude",
+                    "amount_stability", "volume_ratio",
+                    "sector_momentum", "price_momentum", "volume_breakout",
+                    "industry_hotness", "mf_ratio"}
     latest_qr = quarter_results[-1]
     latest_scored = scorer.score_all(latest_qr["df"], sector_neutral=True)
     latest_lookup = latest_scored.set_index("ts_code")
@@ -395,6 +428,8 @@ def run_multi_quarter(config: dict, end_date: str) -> None:
     for m in ["主板", "创业板", "科创板"]:
         cnt = len(df_result[df_result["market"] == m])
         print(f"    {m}: {cnt} stocks")
+
+    _print_etf_recommendations(config)
 
 
 # ============================================================================

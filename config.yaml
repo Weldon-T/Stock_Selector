@@ -13,11 +13,60 @@ logging:
   level: INFO
   file: run.log
 
-# Days of daily data to load for technical factors (robust to holidays)
-multi_daily_lookback: 15
+# Days of daily data to load for technical factors (must cover longest momentum window)
+multi_daily_lookback: 25
 
 # Default strategy
 strategy: value
+
+# ============================================================================
+# ETF Recommendations — suggested funds per strategy line
+# ============================================================================
+etf_recommendations:
+  growth:
+    科创板:
+      - {code: "588000", name: "科创50ETF"}
+      - {code: "588080", name: "科创板50ETF"}
+    半导体芯片:
+      - {code: "512480", name: "半导体ETF"}
+      - {code: "159995", name: "芯片ETF"}
+    人工智能:
+      - {code: "159819", name: "人工智能ETF"}
+      - {code: "159729", name: "AI智能ETF"}
+    机器人:
+      - {code: "562500", name: "机器人ETF"}
+    计算机通信:
+      - {code: "512720", name: "计算机ETF"}
+      - {code: "515880", name: "通信ETF"}
+    新能源:
+      - {code: "515030", name: "新能源车ETF"}
+      - {code: "516160", name: "新能源ETF"}
+    军工:
+      - {code: "512660", name: "军工ETF"}
+    传媒游戏:
+      - {code: "159869", name: "游戏ETF"}
+      - {code: "512980", name: "传媒ETF"}
+
+  defensive:
+    红利高股息:
+      - {code: "510880", name: "红利ETF"}
+      - {code: "515080", name: "中证红利ETF"}
+      - {code: "512590", name: "高股息ETF"}
+    银行:
+      - {code: "512800", name: "银行ETF"}
+      - {code: "515290", name: "银行龙头ETF"}
+    消费:
+      - {code: "159928", name: "消费ETF"}
+      - {code: "515170", name: "食品饮料ETF"}
+    医药:
+      - {code: "512010", name: "医药ETF"}
+      - {code: "159859", name: "生物医药ETF"}
+    公用事业:
+      - {code: "561560", name: "电力ETF"}
+      - {code: "516970", name: "基建ETF"}
+    央企国企:
+      - {code: "510060", name: "央企ETF"}
+      - {code: "512960", name: "国企改革ETF"}
 
 # ============================================================================
 # Strategy Profiles
@@ -25,7 +74,165 @@ strategy: value
 strategies:
 
   # --------------------------------------------------------------------------
-  # Value Investing — quality & valuation focus, quarterly rebalance
+  # Growth Momentum — for K-shaped up-leg: AI/tech/semiconductor hot sectors
+  # 进攻型：行业动量 + 个股趋势 + 放量确认，月度调仓
+  # --------------------------------------------------------------------------
+  growth:
+    hold_months: 1
+
+    select_count:
+      主板: 40
+      创业板: 30
+      科创板: 30
+
+    stock_pool:
+      markets: ["主板", "创业板", "科创板"]
+      min_listing_days: 60
+      max_suspend_days: 10
+      min_daily_amount: 50000
+
+    factors:
+      trend:
+        sector_momentum:
+          weight: 0.22
+          enabled: true
+          direction: positive      # 行业20日涨幅中位数排名
+        price_momentum:
+          weight: 0.20
+          enabled: true
+          direction: positive      # 个股20日涨幅
+        industry_hotness:
+          weight: 0.08
+          enabled: true
+          direction: positive      # 行业10日热度（更短窗口）
+        volume_breakout:
+          weight: 0.10
+          enabled: true
+          direction: positive      # 成交量突破
+        short_momentum:
+          weight: 0.06
+          enabled: true
+          direction: positive      # 3日微动量：追涨
+
+      growth:
+        revenue_yoy:
+          weight: 0.06
+          enabled: true
+          direction: positive
+        profit_yoy:
+          weight: 0.06
+          enabled: true
+          direction: positive
+
+      quality:
+        roe_ttm:
+          weight: 0.06
+          enabled: true
+          direction: positive      # 质量底线：不买垃圾
+        gross_margin:
+          weight: 0.05
+          enabled: true
+          direction: positive
+
+      size:
+        small_cap:
+          weight: 0.06
+          enabled: true
+          direction: positive      # 小盘弹性更大
+
+      risk:
+        volatility:
+          weight: 0.05
+          enabled: true
+          direction: negative      # 控制极端波动
+
+      # Total: 1.00; 66% trend/momentum, 17% quality/growth floor, 11% size/risk
+
+  # --------------------------------------------------------------------------
+  # Defensive Dividend — for K-shaped down-leg: income + safety + low vol
+  # 防御型：高股息 + 低波动 + 质量，季度调仓
+  # --------------------------------------------------------------------------
+  defensive:
+    hold_months: 3
+
+    select_count:
+      主板: 50
+      创业板: 20
+      科创板: 10            # 科创板少配（高波动与防御矛盾）
+
+    stock_pool:
+      markets: ["主板", "创业板", "科创板"]
+      min_listing_days: 120     # 更严格：需要足够的财务和分红历史
+      max_suspend_days: 10
+      min_daily_amount: 50000
+
+    factors:
+      income:
+        dividend_yield:
+          weight: 0.18
+          enabled: false          # FIXME: dv_ratio field availability on free tier unconfirmed
+          direction: positive      # 核心：股息率
+        ep_ttm:
+          weight: 0.10
+          enabled: true
+          direction: positive      # 盈利收益率
+        bp:
+          weight: 0.07
+          enabled: true
+          direction: positive      # 净资产折价
+
+      quality:
+        roe_ttm:
+          weight: 0.14
+          enabled: true
+          direction: positive
+        gross_margin:
+          weight: 0.07
+          enabled: true
+          direction: positive
+        net_margin:
+          weight: 0.07
+          enabled: true
+          direction: positive
+
+      growth:
+        revenue_yoy:
+          weight: 0.04
+          enabled: true
+          direction: positive
+        profit_yoy:
+          weight: 0.04
+          enabled: true
+          direction: positive
+
+      risk:
+        volatility:
+          weight: 0.10
+          enabled: true
+          direction: negative      # 低波动
+        amplitude:
+          weight: 0.05
+          enabled: true
+          direction: negative      # 低日内振幅
+        amount_stability:
+          weight: 0.05
+          enabled: true
+          direction: negative      # 成交额稳定
+        volume_ratio:
+          weight: 0.03
+          enabled: true
+          direction: positive      # 适度活跃
+
+      size:
+        small_cap:
+          weight: 0.06
+          enabled: true
+          direction: positive      # 适度分散到中小价值
+
+      # Total: 1.00; 35% income, 28% quality, 23% risk control, 8% growth
+
+  # --------------------------------------------------------------------------
+  # Value Investing — quality & valuation focus, quarterly rebalance (legacy)
   # --------------------------------------------------------------------------
   value:
     hold_months: 3
@@ -104,11 +311,11 @@ strategies:
         industry_hotness:
           weight: 0.08
           enabled: true
-          direction: positive      # 行业资金热度
+          direction: positive      # 行业10日价格热度
         mf_ratio:
           weight: 0.05
-          enabled: true
-          direction: positive      # 个股主力资金占比
+          enabled: false           # disabled: Tushare free tier has no moneyflow data
+          direction: positive
 
   # --------------------------------------------------------------------------
   # Small-Cap Speculation — size + reversal + low-vol, monthly rebalance
@@ -203,5 +410,5 @@ strategies:
           direction: positive
         mf_ratio:
           weight: 0.08
-          enabled: true
-          direction: positive      # small-caps more sensitive to fund flow
+          enabled: false           # disabled: no moneyflow data
+          direction: positive
