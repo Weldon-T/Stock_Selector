@@ -131,6 +131,51 @@ class DataLoader:
         self.logger.info(f"Loaded {len(frames)}/{lookback} days of daily data, {len(result)} total rows")
         return result
 
+    def load_moneyflow(self, trade_date: str, force_refresh: bool = False) -> pd.DataFrame:
+        table, key = "moneyflow", trade_date
+
+        if not force_refresh and self.cache.has(table, key):
+            self.logger.info(f"Loading moneyflow ({trade_date}) from cache")
+            df = self.cache.get(table, key)
+            if df is not None and not df.empty:
+                return df
+
+        self.logger.info(f"Fetching moneyflow for {trade_date} from Tushare")
+        df = self.client.moneyflow(trade_date)
+        if not df.empty:
+            self.cache.put(table, key, df)
+        return df
+
+    def load_moneyflow_multi(self, end_date: str, lookback: int = 5) -> pd.DataFrame:
+        """Load moneyflow for N days ending at end_date.
+        Only fetches end_date from API (hourly rate limit: 1 call); older dates
+        come from cache. Over multiple runs the cache builds up to `lookback` days."""
+        frames = []
+        end_dt = pd.to_datetime(end_date, format="%Y%m%d")
+
+        # Phase 1: fetch only the latest date from API
+        date_str = end_dt.strftime("%Y%m%d")
+        df = self.load_moneyflow(date_str)
+        if df is not None and not df.empty:
+            frames.append(df)
+
+        # Phase 2: for older dates, only check cache
+        for i in range(1, lookback):
+            dt = end_dt - pd.Timedelta(days=i)
+            date_str = dt.strftime("%Y%m%d")
+            table, key = "moneyflow", date_str
+            if self.cache.has(table, key):
+                df = self.cache.get(table, key)
+                if df is not None and not df.empty:
+                    frames.append(df)
+
+        if not frames:
+            return pd.DataFrame()
+        result = pd.concat(frames, ignore_index=True)
+        days = result["trade_date"].nunique() if "trade_date" in result.columns else 0
+        self.logger.info(f"Moneyflow: {len(frames)}/{lookback} days cached, {len(result)} rows, {days} unique dates")
+        return result
+
     def load_trade_cal(self, start_date: str, end_date: str) -> pd.DataFrame:
         table, key = "trade_cal", f"{start_date}_{end_date}"
 

@@ -100,7 +100,15 @@ strategies:
           enabled: true
           direction: positive      # 适度放量
 
-      # Total: 1.00; no short_reversal — value doesn't chase bounces
+      flow:
+        industry_hotness:
+          weight: 0.08
+          enabled: true
+          direction: positive      # 行业资金热度
+        mf_ratio:
+          weight: 0.05
+          enabled: true
+          direction: positive      # 个股主力资金占比
 
   # --------------------------------------------------------------------------
   # Small-Cap Speculation — size + reversal + low-vol, monthly rebalance
@@ -187,3 +195,13 @@ strategies:
           weight: 0.05
           enabled: true
           direction: positive      # 3-day momentum: ride winners
+
+      flow:
+        industry_hotness:
+          weight: 0.06
+          enabled: true
+          direction: positive
+        mf_ratio:
+          weight: 0.08
+          enabled: true
+          direction: positive      # small-caps more sensitive to fund flow

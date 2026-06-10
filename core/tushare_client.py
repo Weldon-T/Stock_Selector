@@ -128,7 +128,7 @@ class TushareClient:
         return self.request("margin", trade_date=trade_date)
 
     def moneyflow(self, trade_date: str) -> pd.DataFrame:
-        return self.request("moneyflow", trade_date=trade_date)
+        return self.request("moneyflow", max_retries=1, trade_date=trade_date)
 
     def fina_indicator(self, period: str) -> pd.DataFrame:
         return self.request("fina_indicator", period=period)

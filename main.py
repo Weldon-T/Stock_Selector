@@ -157,12 +157,13 @@ def run_pipeline(config: dict, trade_date: str) -> None:
         sys.exit(1)
 
     df_multi_daily = loader.load_daily_multi(trade_date, lookback=config.get("multi_daily_lookback", 10))
+    df_moneyflow = loader.load_moneyflow_multi(trade_date, lookback=5)
     df_filtered = stock_filter.apply(df_basic, df_daily, trade_date)
     if df_filtered.empty:
         logger.warning("No stocks passed the filter. Exiting.")
         return
 
-    df_factors = factor_calc.calculate(df_filtered, df_daily, trade_date, df_multi_daily)
+    df_factors = factor_calc.calculate(df_filtered, df_daily, trade_date, df_multi_daily, df_moneyflow)
     df_scored = scorer.score_all(df_factors, sector_neutral=True)
 
     # Per-market selection
@@ -235,11 +236,12 @@ def _run_quarter_date(loader, stock_filter, factor_calc, d: str,
         return None
 
     df_multi_daily = loader.load_daily_multi(d, lookback=lookback)
+    df_moneyflow = loader.load_moneyflow_multi(d, lookback=5)
     df_filtered = stock_filter.apply(df_basic, df_daily, d)
     if df_filtered.empty:
         return None
 
-    return factor_calc.calculate(df_filtered, df_daily, d, df_multi_daily)
+    return factor_calc.calculate(df_filtered, df_daily, d, df_multi_daily, df_moneyflow)
 
 
 def run_multi_quarter(config: dict, end_date: str) -> None:
