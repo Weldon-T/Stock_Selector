@@ -6,6 +6,9 @@ Stock Selection Tool - Multi-factor scoring engine for A-share market.
 Usage:
     python main.py                                # Today's selection
     python main.py --date 2024-09-30              # Historical selection
+    python main.py --strategy growth              # Growth/momentum strategy
+    python main.py --strategy defensive           # Defensive/dividend strategy
+    python main.py --compare                      # Growth + defensive side-by-side Excel
     python main.py --date 2026-05-07 --multi-quarter  # 4-quarter weighted, sector-neutral
     python main.py --backtest --start 2024-01-01 --end 2024-12-31  # Backtest
 """
@@ -64,6 +67,10 @@ def parse_args() -> argparse.Namespace:
         "--strategy", type=str, default=None,
         help="Strategy: growth | defensive | value | smallcap (default: from config.yaml)",
     )
+    parser.add_argument(
+        "--compare", action="store_true",
+        help="Run growth + defensive strategies and output to one Excel file with tabs",
+    )
     return parser.parse_args()
 
 
@@ -117,6 +124,43 @@ def _resolve_strategy(config: dict, strategy: str | None) -> None:
 # Single-date pipeline
 # ============================================================================
 
+def _write_results(df_result: pd.DataFrame, config: dict, trade_date: str,
+                   suffix: str = "") -> Path:
+    """Write results to Excel with two tabs: 选股结果 + ETF推荐."""
+    output_dir = Path(config.get("paths", {}).get("output_dir", "./output"))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    strategy = config.get("_strategy_name", "unknown")
+
+    filename = f"选股结果_{trade_date}"
+    if suffix:
+        filename += f"_{suffix}"
+    output_path = output_dir / f"{filename}.xlsx"
+
+    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        # Tab 1: stock picks
+        df_result.to_excel(writer, sheet_name="选股结果", index=False)
+
+        # Tab 2: ETF recommendations
+        etf_map = config.get("etf_recommendations", {})
+        strategy_to_category = {
+            "growth": "growth", "smallcap": "growth",
+            "defensive": "defensive", "value": "defensive",
+        }
+        category = strategy_to_category.get(strategy, "defensive")
+        recs = etf_map.get(category, {})
+
+        etf_rows = []
+        for sector, funds in recs.items():
+            for f in funds:
+                etf_rows.append({"板块": sector, "代码": f["code"], "名称": f["name"]})
+        etf_df = pd.DataFrame(etf_rows)
+        etf_df.to_excel(writer, sheet_name="ETF推荐", index=False)
+
+    logger = get_logger()
+    logger.info(f"Results saved to: {output_path} ({len(df_result)} stocks, {len(etf_rows)} ETFs)")
+    return output_path
+
+
 def _print_top10(df: pd.DataFrame, label: str) -> None:
     print("\n" + "=" * 70)
     print(f"  Top 10 Stocks — {label}")
@@ -159,8 +203,6 @@ def _print_etf_recommendations(config: dict) -> None:
 
 def run_pipeline(config: dict, trade_date: str) -> None:
     logger = get_logger()
-    output_dir = Path(config.get("paths", {}).get("output_dir", "./output"))
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"=== Stock Selection Pipeline: {format_date(trade_date)} ===")
 
@@ -205,11 +247,8 @@ def run_pipeline(config: dict, trade_date: str) -> None:
     df_result = pd.concat(parts, ignore_index=True)
     df_result = df_result.sort_values("final_score", ascending=False).reset_index(drop=True)
 
-    output_path = output_dir / f"选股结果_{trade_date}.csv"
-    df_result.to_csv(output_path, index=False, encoding="utf-8-sig")
-    logger.info(f"Results saved to: {output_path} ({len(df_result)} stocks)")
+    _write_results(df_result, config, trade_date)
     _print_top10(df_result, format_date(trade_date))
-    _print_etf_recommendations(config)
 
 
 # ============================================================================
@@ -418,9 +457,7 @@ def run_multi_quarter(config: dict, end_date: str) -> None:
     df_result = df_result.sort_values("final_score", ascending=False).reset_index(drop=True)
 
     # 5. Output
-    output_path = output_dir / f"选股结果_多季度_{end_date}.csv"
-    df_result.to_csv(output_path, index=False, encoding="utf-8-sig")
-    logger.info(f"Results saved to: {output_path} ({len(df_result)} stocks)")
+    _write_results(df_result, config, end_date, suffix="多季度")
 
     _print_top10(df_result, f"Multi-Quarter → {format_date(end_date)} (sector-neutral)")
 
@@ -429,12 +466,90 @@ def run_multi_quarter(config: dict, end_date: str) -> None:
         cnt = len(df_result[df_result["market"] == m])
         print(f"    {m}: {cnt} stocks")
 
-    _print_etf_recommendations(config)
-
 
 # ============================================================================
 # Main
 # ============================================================================
+
+def run_compare(config: dict, trade_date: str) -> None:
+    """Run growth + defensive strategies and output to one Excel with per-strategy tabs."""
+    logger = get_logger()
+    output_dir = Path(config.get("paths", {}).get("output_dir", "./output"))
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    cache = SQLiteCache(config.get("paths", {}).get("cache_dir", "./cache"))
+    client = TushareClient(config["tushare_token"])
+    if not client.login():
+        logger.error("Tushare login failed. Aborting.")
+        sys.exit(1)
+
+    loader = DataLoader(client, cache)
+
+    results = {}
+    for strategy_name in ("growth", "defensive"):
+        logger.info(f"\n{'='*50}\n  Running {strategy_name} strategy\n{'='*50}")
+        strat_config = dict(config)
+        _resolve_strategy(strat_config, strategy_name)
+
+        stock_filter = StockFilter(strat_config)
+        factor_calc = FactorCalculator(strat_config)
+        scorer = StockScorer(strat_config)
+
+        df_basic = loader.load_stock_basic(trade_date)
+        if df_basic.empty:
+            logger.error(f"[{strategy_name}] Failed to load stock_basic")
+            continue
+
+        df_daily = loader.load_daily_all(trade_date)
+        if df_daily.empty:
+            logger.error(f"[{strategy_name}] No daily data for {trade_date}")
+            continue
+
+        df_multi_daily = loader.load_daily_multi(trade_date, lookback=config.get("multi_daily_lookback", 25))
+        df_moneyflow = loader.load_moneyflow_multi(trade_date, lookback=5)
+        df_filtered = stock_filter.apply(df_basic, df_daily, trade_date)
+        if df_filtered.empty:
+            logger.warning(f"[{strategy_name}] No stocks passed filter")
+            continue
+
+        df_factors = factor_calc.calculate(df_filtered, df_daily, trade_date, df_multi_daily, df_moneyflow)
+        df_scored = scorer.score_all(df_factors, sector_neutral=True)
+
+        select_count = strat_config.get("select_count", {"主板": 50, "创业板": 20, "科创板": 20})
+        parts = []
+        for market, count in select_count.items():
+            subset = df_scored[df_scored["market"] == market].head(count)
+            parts.append(subset)
+            logger.info(f"  [{strategy_name}] {market}: selected {len(subset)}/{count}")
+        df_result = pd.concat(parts, ignore_index=True)
+        df_result = df_result.sort_values("final_score", ascending=False).reset_index(drop=True)
+        results[strategy_name] = (df_result, strat_config)
+        _print_top10(df_result, f"{strategy_name} strategy — {format_date(trade_date)}")
+
+    if not results:
+        logger.error("No strategy produced results. Aborting.")
+        sys.exit(1)
+
+    # Write single Excel with per-strategy tabs + combined ETF tab
+    output_path = output_dir / f"选股对比_{trade_date}.xlsx"
+    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        for strategy_name, (df_result, _) in results.items():
+            tab_name = "进攻型_growth" if strategy_name == "growth" else "防御型_defensive"
+            df_result.to_excel(writer, sheet_name=tab_name, index=False)
+
+        # ETF tab: both lines
+        etf_rows = []
+        etf_map = config.get("etf_recommendations", {})
+        for line, label in [("growth", "进攻型"), ("defensive", "防御型")]:
+            for sector, funds in etf_map.get(line, {}).items():
+                for f in funds:
+                    etf_rows.append({"线路": label, "板块": sector, "代码": f["code"], "名称": f["name"]})
+        pd.DataFrame(etf_rows).to_excel(writer, sheet_name="ETF推荐", index=False)
+
+    logger.info(f"Comparison saved to: {output_path}")
+    print(f"\n  Comparison Excel: {output_path}")
+    print(f"  Sheets: 进攻型_growth, 防御型_defensive, ETF推荐\n")
+
 
 def main():
     load_dotenv()
@@ -452,7 +567,10 @@ def main():
     logger = get_logger()
     logger.info("Stock Selection Tool started")
 
-    if args.backtest:
+    if args.compare:
+        trade_date = parse_date(args.date)
+        run_compare(config, trade_date)
+    elif args.backtest:
         if not args.start or not args.end:
             logger.error("Backtest mode requires --start and --end dates")
             sys.exit(1)
